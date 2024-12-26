@@ -45,14 +45,14 @@ cat << 'BANNER'
 BANNER
 }
 
-INSTALL_DIR="/opt/groundcover"
-ENV_DIR="/etc/opt/groundcover"
-SENSOR_NAME="groundcover-sensor"
-TARBALL_NAME="${SENSOR_NAME}-latest.tar.gz"
-SERVICE_NAME="${SENSOR_NAME}.service"
-ENV_PATH="${ENV_DIR}/env.conf"
-USER_CONFIG_PATH="${ENV_DIR}/overrides.yaml"
-RELEASE_URL_PREFIX="https://groundcover.com/artifacts/latest/groundcover-sensor"
+INSTALL_DIR="${SENSOR_INSTALL_DIR:-/opt/groundcover}"
+ENV_DIR="${SENSOR_ENV_DIR:-/etc/opt/groundcover}"
+SENSOR_NAME="${SENSOR_NAME:-groundcover-sensor}"
+TARBALL_NAME="${SENSOR_TARBALL_NAME:-${SENSOR_NAME}-latest.tar.gz}"
+SERVICE_NAME="${SENSOR_SERVICE_NAME:-${SENSOR_NAME}.service}"
+ENV_PATH="${SENSOR_ENV_PATH:-${ENV_DIR}/env.conf}"
+USER_CONFIG_PATH="${SENSOR_USER_CONFIG_PATH:-${ENV_DIR}/overrides.yaml}"
+RELEASE_URL_PREFIX="${SENSOR_RELEASE_URL_PREFIX:-https://groundcover.com/artifacts/latest/groundcover-sensor}"
 
 REQUIRED_VARS=("API_KEY" "GC_ENV_NAME" "GC_DOMAIN")
 
@@ -206,6 +206,7 @@ EOL
 
     log_info "Writing environment variables"
     echo "API_KEY=$API_KEY" >> "${ENV_PATH}"
+    echo "CONFIG_OVERRIDES_PATH=${USER_CONFIG_PATH}" >> "${ENV_PATH}"
     echo "FLORA_PROMETHEUSSERVER_ENABLED=false" >> "${ENV_PATH}"
     echo "FLORA_CONTAINERREPOSITORY_TRACKEDCONTAINERTYPE=docker" >> "${ENV_PATH}"
 
