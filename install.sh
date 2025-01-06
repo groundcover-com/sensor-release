@@ -54,6 +54,10 @@ ENV_PATH="${SENSOR_ENV_PATH:-${ENV_DIR}/env.conf}"
 USER_CONFIG_PATH="${SENSOR_USER_CONFIG_PATH:-${ENV_DIR}/overrides.yaml}"
 RELEASE_URL_PREFIX="${SENSOR_RELEASE_URL_PREFIX:-https://groundcover.com/artifacts/latest/groundcover-sensor}"
 
+GO_MAX_PROCS="${SENSOR_GO_MAX_PROCS:-2}"
+GO_MEMORY_LIMIT="${SENSOR_GO_MEMORY_LIMIT:-2048MiB}"
+MAX_MEMORY_LIMIT="${SENSOR_MAX_MEMORY_LIMIT:-4G}"
+
 REQUIRED_VARS=("API_KEY" "GC_ENV_NAME" "GC_DOMAIN")
 
 set -e
@@ -209,6 +213,8 @@ EOL
     echo "CONFIG_OVERRIDES_PATH=${USER_CONFIG_PATH}" >> "${ENV_PATH}"
     echo "FLORA_PROMETHEUSSERVER_ENABLED=false" >> "${ENV_PATH}"
     echo "FLORA_CONTAINERREPOSITORY_TRACKEDCONTAINERTYPE=docker" >> "${ENV_PATH}"
+    echo "GOMAXPROCS=${GO_MAX_PROCS}" >> "${ENV_PATH}"
+    echo "GOMEMORYLIMIT=${GO_MEMORY_LIMIT}" >> "${ENV_PATH}"
 
     log_success "Environment configuration completed"
 }
@@ -226,6 +232,7 @@ User=root
 WorkingDirectory=${INSTALL_DIR}
 EnvironmentFile=${ENV_PATH}
 ExecStart=${BINARY_PATH}
+MemoryMax=${MAX_MEMORY_LIMIT}
 Restart=on-failure
 
 [Install]
