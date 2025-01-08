@@ -88,6 +88,13 @@ validateEnvVars() {
     log_success "All required environment variables are set"
 }
 
+checkCurl() {
+    if ! command -v curl >/dev/null 2>&1; then
+        log_error "curl not found"
+        exit 1
+    fi
+}
+
 downloadRelease() {
     log_info "Detecting system architecture"
     local arch
@@ -110,16 +117,13 @@ downloadRelease() {
     local download_url="${RELEASE_URL_PREFIX}-${tarball_arch}"
     log_info "Downloading release from: ${download_url}"
     
-    if command -v curl >/dev/null 2>&1; then
-        http_code=$(curl -s -w "%{http_code}" -L -o "${TARBALL_NAME}" "${download_url}")
+    checkCurl
+    
+    http_code=$(curl -s -w "%{http_code}" -L -o "${TARBALL_NAME}" "${download_url}")
         
-        if [[ "${http_code}" != "200" ]]; then
-            rm -f "${TARBALL_NAME}"
-            log_error "Failed to download release package"
-            exit 1
-        fi
-    else
-        log_error "curl not found"
+    if [[ "${http_code}" != "200" ]]; then
+        rm -f "${TARBALL_NAME}"
+        log_error "Failed to download release package"
         exit 1
     fi
 
@@ -297,9 +301,27 @@ uninstallSensor() {
 
 }
 
+checkConnectivity() {
+    log_info "Checking connectivity to groundcover backend"
+    local health_url="https://${GC_DOMAIN}/health/live"
+    
+    checkCurl
+
+    local http_code
+    http_code=$(curl -s -w "%{http_code}" -o /dev/null -H "apikey: ${API_KEY}" "${health_url}")
+    
+    if [[ "${http_code}" != "200" ]]; then
+        log_error "Failed to connect to groundcover backend (HTTP ${http_code}), please check your API key and contact support if the issue persists"
+        exit 1
+    fi
+
+    log_success "Successfully verified connectivity to groundcover backend"
+}
+
 install() {
     validateEnvVars
     printBanner
+    checkConnectivity
     downloadRelease
     prepareSetup
     installSensor
