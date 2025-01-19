@@ -53,6 +53,7 @@ SERVICE_NAME="${SENSOR_SERVICE_NAME:-${SENSOR_NAME}.service}"
 ENV_PATH="${SENSOR_ENV_PATH:-${ENV_DIR}/env.conf}"
 USER_CONFIG_PATH="${SENSOR_USER_CONFIG_PATH:-${ENV_DIR}/overrides.yaml}"
 RELEASE_URL_PREFIX="${SENSOR_RELEASE_URL_PREFIX:-https://groundcover.com/artifacts/latest/groundcover-sensor}"
+RELEASE_URL="${SENSOR_RELEASE_URL:-}"
 
 GO_MAX_PROCS="${SENSOR_GO_MAX_PROCS:-2}"
 GO_MEMORY_LIMIT="${SENSOR_GO_MEMORY_LIMIT:-2048MiB}"
@@ -96,25 +97,31 @@ checkCurl() {
 }
 
 downloadRelease() {
-    log_info "Detecting system architecture"
-    local arch
-    arch=$(uname -m)
-    local tarball_arch
+    local download_url
+    if [[ -n "${RELEASE_URL}" ]]; then
+        download_url="${RELEASE_URL}"
+    else
+        log_info "Detecting system architecture"
+        local arch
+        arch=$(uname -m)
+        local tarball_arch
 
-    case "${arch}" in
-        x86_64)
-            tarball_arch="amd64"
-            ;;
-        aarch64)
-            tarball_arch="arm64"
-            ;;
-        *)
-            log_error "Unsupported architecture: ${arch}"
-            exit 1
-            ;;
-    esac
+        case "${arch}" in
+            x86_64)
+                tarball_arch="amd64"
+                ;;
+            aarch64)
+                tarball_arch="arm64"
+                ;;
+            *)
+                log_error "Unsupported architecture: ${arch}"
+                exit 1
+                ;;
+        esac
 
-    local download_url="${RELEASE_URL_PREFIX}-${tarball_arch}"
+        download_url="${RELEASE_URL_PREFIX}-${tarball_arch}"
+    fi
+
     log_info "Downloading release from: ${download_url}"
     
     checkCurl
