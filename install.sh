@@ -46,6 +46,7 @@ BANNER
 }
 
 INSTALL_DIR="${SENSOR_INSTALL_DIR:-/opt/groundcover}"
+SCRAPE_CONFIG_DIR="scrape-config"
 ENV_DIR="${SENSOR_ENV_DIR:-/etc/opt/groundcover}"
 SENSOR_NAME="${SENSOR_NAME:-groundcover-sensor}"
 TARBALL_NAME="${SENSOR_TARBALL_NAME:-${SENSOR_NAME}-latest.tar.gz}"
@@ -166,7 +167,8 @@ prepareSensorConfig() {
 
 prepareSetup() {
     local CONFIG_PATH="${INSTALL_DIR}/config/config.yaml"
-    local SCRAPE_CONFIG_PATH="${INSTALL_DIR}/scrape-config/config.yaml"
+    local LOGS_SCRAPE_CONFIG_PATH="${INSTALL_DIR}/${SCRAPE_CONFIG_DIR}/logs-scrape-config.yaml"
+    local METRICS_SCRAPE_CONFIG_PATH="${INSTALL_DIR}/${SCRAPE_CONFIG_DIR}/metrics-scrape-config.yaml"
 
     log_info "Starting sensor package setup"
 
@@ -191,7 +193,8 @@ prepareSetup() {
     chmod +x "${BINARY_PATH}"
 
     prepareSensorConfig "${CONFIG_PATH}"
-    prepareSensorConfig "${SCRAPE_CONFIG_PATH}"
+    prepareSensorConfig "${LOGS_SCRAPE_CONFIG_PATH}"
+    prepareSensorConfig "${METRICS_SCRAPE_CONFIG_PATH}"
 }
 
 setupServiceEnv() {
