@@ -221,7 +221,7 @@ EOL
     echo "FLORA_PROMETHEUSSERVER_ENABLED=false" >> "${ENV_PATH}"
     echo "FLORA_CONTAINERREPOSITORY_TRACKEDCONTAINERTYPE=docker" >> "${ENV_PATH}"
     echo "GOMAXPROCS=${GO_MAX_PROCS}" >> "${ENV_PATH}"
-    echo "GOMEMORYLIMIT=${GO_MEMORY_LIMIT}" >> "${ENV_PATH}"
+    echo "GOMEMLIMIT=${GO_MEMORY_LIMIT}" >> "${ENV_PATH}"
 
     log_success "Environment configuration completed"
 }
