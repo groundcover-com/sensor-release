@@ -120,7 +120,7 @@ downloadRelease() {
     
     checkCurl
     
-    http_code=$(curl -s -w "%{http_code}" -L -o "${TARBALL_NAME}" "${download_url}")
+    http_code=$(curl -s -w "%{http_code}" -L -o "${TARBALL_NAME}" "${download_url}" || echo "000")
         
     if [[ "${http_code}" != "200" ]]; then
         rm -f "${TARBALL_NAME}"
@@ -182,6 +182,7 @@ prepareSetup() {
 
     log_info "Extracting sensor package"
     tar -xzf "${TARBALL_NAME}" -C "${INSTALL_DIR}"
+    rm -f "${TARBALL_NAME}"
 
     BINARY_PATH="${INSTALL_DIR}/${SENSOR_NAME}"
     if [[ ! -x "${BINARY_PATH}" ]]; then
@@ -300,6 +301,11 @@ uninstallSensor() {
         rm -rfv "${INSTALL_DIR}"
     fi
 
+    if [[ -d "${ENV_DIR}" ]]; then
+        log_info "Removing environment configuration directory"
+        rm -rfv "${ENV_DIR}"
+    fi
+
     log_success "Uninstallation completed successfully"
 
 }
@@ -311,7 +317,7 @@ checkConnectivity() {
     checkCurl
 
     local http_code
-    http_code=$(curl -s -w "%{http_code}" -o /dev/null -H "apikey: ${API_KEY}" "${health_url}")
+    http_code=$(curl -s -w "%{http_code}" -o /dev/null -H "apikey: ${API_KEY}" "${health_url}" || echo "000")
     
     if [[ "${http_code}" != "200" ]]; then
         log_error "Failed to connect to groundcover backend (HTTP ${http_code}), please check your API key and contact support if the issue persists"
@@ -353,4 +359,4 @@ main() {
 
 }
 
-main "$@" || exit 1
+main "$@"
