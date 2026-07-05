@@ -119,12 +119,21 @@ downloadRelease() {
     log_info "Downloading release from: ${download_url}"
     
     checkCurl
-    
-    http_code=$(curl -s -w "%{http_code}" -L -o "${TARBALL_NAME}" "${download_url}" || echo "000")
-        
+
+    WORK_DIR=$(mktemp -d)
+    trap 'rm -rf "${WORK_DIR}"' EXIT
+    TARBALL_PATH="${WORK_DIR}/${TARBALL_NAME}"
+
+    local http_code rc=0
+    http_code=$(curl -sS -w "%{http_code}" -L --retry 3 --connect-timeout 10 --max-time 600 -o "${TARBALL_PATH}" "${download_url}") || rc=$?
+
+    if [[ ${rc} -ne 0 ]]; then
+        log_error "Failed to download release package (curl exit code ${rc})"
+        exit 1
+    fi
+
     if [[ "${http_code}" != "200" ]]; then
-        rm -f "${TARBALL_NAME}"
-        log_error "Failed to download release package"
+        log_error "Failed to download release package (HTTP ${http_code})"
         exit 1
     fi
 
@@ -172,8 +181,8 @@ prepareSetup() {
 
     log_info "Starting sensor package setup"
 
-    if [[ ! -f "${TARBALL_NAME}" ]]; then
-        log_error "Tarball ${TARBALL_NAME} not found in the current directory"
+    if [[ ! -f "${TARBALL_PATH}" ]]; then
+        log_error "Downloaded tarball ${TARBALL_PATH} not found"
         exit 1
     fi
 
@@ -181,8 +190,7 @@ prepareSetup() {
     mkdir -p "${INSTALL_DIR}"
 
     log_info "Extracting sensor package"
-    tar -xzf "${TARBALL_NAME}" -C "${INSTALL_DIR}"
-    rm -f "${TARBALL_NAME}"
+    tar -xzf "${TARBALL_PATH}" -C "${INSTALL_DIR}"
 
     BINARY_PATH="${INSTALL_DIR}/${SENSOR_NAME}"
     if [[ ! -x "${BINARY_PATH}" ]]; then
@@ -316,9 +324,14 @@ checkConnectivity() {
     
     checkCurl
 
-    local http_code
-    http_code=$(curl -s -w "%{http_code}" -o /dev/null -H "apikey: ${API_KEY}" "${health_url}" || echo "000")
-    
+    local http_code rc=0
+    http_code=$(curl -sS -w "%{http_code}" -o /dev/null --retry 2 --connect-timeout 10 --max-time 30 -H "apikey: ${API_KEY}" "${health_url}") || rc=$?
+
+    if [[ ${rc} -ne 0 ]]; then
+        log_error "Failed to connect to groundcover backend (curl exit code ${rc}), please check your network connectivity and contact support if the issue persists"
+        exit 1
+    fi
+
     if [[ "${http_code}" != "200" ]]; then
         log_error "Failed to connect to groundcover backend (HTTP ${http_code}), please check your API key and contact support if the issue persists"
         exit 1
