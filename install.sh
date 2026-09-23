@@ -49,6 +49,7 @@ INSTALL_DIR="${SENSOR_INSTALL_DIR:-/opt/groundcover}"
 SCRAPE_CONFIG_DIR="scrape-config"
 ENV_DIR="${SENSOR_ENV_DIR:-/etc/opt/groundcover}"
 SENSOR_NAME="${SENSOR_NAME:-groundcover-sensor}"
+SENSOR_VERSION="${SENSOR_VERSION:-latest}"
 TARBALL_NAME="${SENSOR_TARBALL_NAME:-${SENSOR_NAME}-latest.tar.gz}"
 SERVICE_NAME="${SENSOR_SERVICE_NAME:-${SENSOR_NAME}.service}"
 ENV_PATH="${SENSOR_ENV_PATH:-${ENV_DIR}/env.conf}"
@@ -67,6 +68,8 @@ usage() {
     echo "Usage: $0 [install|uninstall]"
     echo "  install   - Install or update the sensor"
     echo "  uninstall - Remove the sensor and all its configurations"
+    echo ""
+    echo "Set SENSOR_VERSION to a release version (e.g. 1.12.383) to install it instead of latest."
     exit 1
 }
 
@@ -80,6 +83,16 @@ checkRootPrivileges() {
 
 validateEnvVars() {
     log_info "Validating required environment variables"
+    if [[ "${SENSOR_VERSION}" != "latest" ]]; then
+        if [[ ! "${SENSOR_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            log_error "SENSOR_VERSION must be 'latest' or a version in X.Y.Z format (e.g. 1.12.383)"
+            exit 1
+        fi
+        if [[ -n "${SENSOR_RELEASE_URL_PREFIX:-}" ]]; then
+            log_error "SENSOR_VERSION cannot be combined with SENSOR_RELEASE_URL_PREFIX; unset one of them"
+            exit 1
+        fi
+    fi
     for var in "${REQUIRED_VARS[@]}"; do
         if [[ -z "${!var:-}" ]]; then
             log_error "Environment variable $var must be set"
@@ -116,6 +129,9 @@ downloadRelease() {
     esac
 
     local download_url="${RELEASE_URL_PREFIX}-${tarball_arch}"
+    if [[ "${SENSOR_VERSION}" != "latest" ]]; then
+        download_url="https://github.com/groundcover-com/sensor-release/releases/download/release/sensor/${SENSOR_VERSION}/groundcover-sensor-${tarball_arch}.tar.gz"
+    fi
     log_info "Downloading release from: ${download_url}"
     
     checkCurl
