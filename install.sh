@@ -253,6 +253,7 @@ After=network.target
 Type=simple
 User=root
 WorkingDirectory=${INSTALL_DIR}
+Environment="HOSTNAME=%H"
 EnvironmentFile=${ENV_PATH}
 ExecStart=${BINARY_PATH}
 MemoryMax=${MAX_MEMORY_LIMIT}
