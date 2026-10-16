@@ -1,0 +1,21 @@
+name: Installer tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  docker-install:
+    name: Docker installer acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - name: Check installer syntax
+        run: bash -n install.sh
+      - name: Exercise installation on a read-only appliance
+        run: python3 -m unittest discover -s tests -v
