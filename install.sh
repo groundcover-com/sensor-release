@@ -75,8 +75,8 @@ usage() {
     echo "  uninstall - Remove the sensor and all its configurations"
     echo ""
     echo "Set SENSOR_VERSION to a release version (e.g. 1.12.383) to install it instead of latest."
-    echo "Set SENSOR_INSTALL_MODE=docker to run the sensor as a container on a read-only host;"
-    echo "it needs SENSOR_VERSION and keeps all state under SENSOR_DATA_DIR (default /data/groundcover)."
+    echo "Set SENSOR_INSTALL_MODE=docker to run the sensor as a container instead of a systemd service;"
+    echo "it keeps its configuration and state under SENSOR_DATA_DIR (default /data/groundcover)."
     exit 1
 }
 
@@ -97,10 +97,6 @@ validateInstallMode() {
 
 validateEnvVars() {
     log_info "Validating required environment variables"
-    if [[ "${INSTALL_MODE}" == "docker" && "${SENSOR_VERSION}" == "latest" ]]; then
-        log_error "Docker installation requires SENSOR_VERSION in X.Y.Z format; the sensor image has no 'latest' tag"
-        exit 1
-    fi
     if [[ "${SENSOR_VERSION}" != "latest" ]]; then
         if [[ ! "${SENSOR_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             log_error "SENSOR_VERSION must be 'latest' or a version in X.Y.Z format (e.g. 1.12.383)"
@@ -128,7 +124,6 @@ checkCurl() {
 }
 
 downloadRelease() {
-    local tarball_path="${1}"
     log_info "Detecting system architecture"
     local arch
     arch=$(uname -m)
@@ -155,10 +150,10 @@ downloadRelease() {
     
     checkCurl
     
-    http_code=$(curl -s -w "%{http_code}" -L -o "${tarball_path}" "${download_url}")
+    http_code=$(curl -s -w "%{http_code}" -L -o "${TARBALL_NAME}" "${download_url}")
 
     if [[ "${http_code}" != "200" ]]; then
-        rm -f "${tarball_path}"
+        rm -f "${TARBALL_NAME}"
         log_error "Failed to download release package"
         exit 1
     fi
@@ -347,16 +342,36 @@ checkDocker() {
     fi
 }
 
+resolveLatestVersion() {
+    # The image is published per release only, so `latest` becomes the newest release tag.
+    local latest_url
+    latest_url=$(curl -s -o /dev/null -w "%{redirect_url}" "https://github.com/groundcover-com/sensor-release/releases/latest")
+    SENSOR_VERSION="${latest_url##*/}"
+    if [[ ! "${SENSOR_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        log_error "Failed to resolve the latest sensor version; set SENSOR_VERSION"
+        exit 1
+    fi
+    log_info "Latest sensor version: ${SENSOR_VERSION}"
+}
+
 prepareDockerSetup() {
-    local tarball_path="${DATA_DIR}/sensor.tar.gz"
+    # Download into the data directory: the working directory may be read-only.
+    TARBALL_NAME="${DATA_DIR}/${TARBALL_NAME##*/}"
 
     log_info "Preparing sensor data directory: ${DATA_DIR}"
-    mkdir -p "${DATA_DIR}/state/positions" "${DATA_DIR}/state/vmagent_pq"
+    if ! mkdir -p "${DATA_DIR}/state/positions" "${DATA_DIR}/state/vmagent_pq"; then
+        log_error "Cannot write ${DATA_DIR}; set SENSOR_DATA_DIR to a writable, persistent directory"
+        exit 1
+    fi
 
-    downloadRelease "${tarball_path}"
+    downloadRelease
     log_info "Extracting sensor configuration"
-    tar -xzf "${tarball_path}" -C "${DATA_DIR}" config "${SCRAPE_CONFIG_DIR}"
-    rm -f "${tarball_path}"
+    if ! tar -xzf "${TARBALL_NAME}" -C "${DATA_DIR}" config "${SCRAPE_CONFIG_DIR}"; then
+        rm -f "${TARBALL_NAME}"
+        log_error "Failed to extract sensor configuration"
+        exit 1
+    fi
+    rm -f "${TARBALL_NAME}"
 
     prepareSensorConfig "${DATA_DIR}/config/config.yaml"
     prepareSensorConfig "${DATA_DIR}/${SCRAPE_CONFIG_DIR}/logs-scrape-config.yaml"
@@ -402,8 +417,12 @@ startDockerSensor() {
         fi
     done
 
+    # main runs under `||`, which disables `set -e`, so each docker step checks itself.
     log_info "Pulling sensor image ${image}"
-    docker pull "${image}" >/dev/null
+    if ! docker pull "${image}" >/dev/null; then
+        log_error "Failed to pull sensor image ${image}"
+        exit 1
+    fi
 
     if docker inspect "${SENSOR_NAME}" >/dev/null 2>&1; then
         log_info "Replacing existing sensor container"
@@ -411,11 +430,14 @@ startDockerSensor() {
     fi
 
     log_info "Starting sensor container"
-    docker run -d --name "${SENSOR_NAME}" --restart unless-stopped \
+    if ! docker run -d --name "${SENSOR_NAME}" --restart unless-stopped \
         --read-only --tmpfs /tmp --network host \
         --memory "${MAX_MEMORY_LIMIT}" \
         --env-file "${DATA_DIR}/env.conf" -e "HOSTNAME=$(hostname)" \
-        "${mounts[@]}" "${image}" >/dev/null
+        "${mounts[@]}" "${image}" >/dev/null; then
+        log_error "Failed to start sensor container"
+        exit 1
+    fi
 
     local attempt
     for attempt in $(seq 1 60); do
@@ -464,12 +486,15 @@ install() {
     if [[ "${INSTALL_MODE}" == "docker" ]]; then
         checkDocker
         checkConnectivity
+        if [[ "${SENSOR_VERSION}" == "latest" ]]; then
+            resolveLatestVersion
+        fi
         prepareDockerSetup
         startDockerSensor
         return
     fi
     checkConnectivity
-    downloadRelease "${TARBALL_NAME}"
+    downloadRelease
     prepareSetup
     installSensor
     startService

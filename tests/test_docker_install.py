@@ -162,12 +162,6 @@ class DockerInstallTest(unittest.TestCase):
                                                check=False).returncode, 0)
             self.assertEqual(appliance.read('/data/groundcover/state/positions/keep'), sentinel)
 
-    def test_docker_install_requires_an_explicit_version(self):
-        with Appliance(self.image) as appliance:
-            result = appliance.install(SENSOR_VERSION='latest')
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn('Docker installation requires SENSOR_VERSION', result.stdout + result.stderr)
-
 
 if __name__ == '__main__':
     unittest.main()

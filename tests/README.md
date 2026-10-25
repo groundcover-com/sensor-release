@@ -4,7 +4,7 @@ These tests specify the proposed `SENSOR_INSTALL_MODE=docker` path of
 `install.sh`. The existing systemd install remains the default.
 
 The customer runs the installer from the device, passing an ingestion key,
-environment, BYOC hostname and explicit `SENSOR_VERSION`. No uploaded bundle,
+environment, BYOC hostname and optional `SENSOR_VERSION`. No uploaded bundle,
 Docker Compose, writable `/etc` or writable `/opt` is required. Docker mode
 downloads the release configuration and runs the matching published image with
 eBPF disabled, a read-only container root and persistent state under
@@ -12,9 +12,9 @@ eBPF disabled, a read-only container root and persistent state under
 Reinstall updates the container while preserving that state. Uninstall removes
 the managed container and preserves the data directory.
 
-`latest` is rejected for Docker installs: the published image does not have a
-`latest` tag. Native/systemd installation keeps its existing version behavior.
-Buffering and replay are outside this change.
+The published image has no `latest` tag, so an unpinned Docker install resolves
+`latest` to the newest release and runs that tag. Native/systemd installation
+keeps its existing version behavior. Buffering and replay are outside this change.
 
 Run on a Linux-capable Docker host with outbound access to GitHub, Docker Hub,
 the Alpine package mirror and public ECR:
@@ -32,8 +32,7 @@ local HTTPS destination keep this test independent of any real tenant.
 
 The successful-install scenario observes the running container, health
 endpoint, mounts, environment, generated configuration and retained state
-across reinstall and uninstall. The second scenario rejects an unpinned
-Docker install. All owned containers, data volumes, networks and fixture
+across reinstall and uninstall. All owned containers, data volumes, networks and fixture
 images are removed. No host Docker data or existing containers are changed.
 
 For another published release, set `TEST_SENSOR_VERSION`. The default is the
