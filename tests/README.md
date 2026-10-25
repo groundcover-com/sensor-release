@@ -32,7 +32,9 @@ local HTTPS destination keep this test independent of any real tenant.
 
 The successful-install scenario observes the running container, health
 endpoint, mounts, environment, generated configuration and retained state
-across reinstall and uninstall. All owned containers, data volumes, networks and fixture
+across reinstall and uninstall. The no-BTF scenario hides `/sys/kernel/btf` from
+the appliance, as on kernels built without `CONFIG_DEBUG_INFO_BTF`, and requires
+the sensor to keep pushing host metrics. All owned containers, data volumes, networks and fixture
 images are removed. No host Docker data or existing containers are changed.
 
 For another published release, set `TEST_SENSOR_VERSION`. The default is the

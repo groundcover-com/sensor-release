@@ -25,9 +25,11 @@ def command(args, *, timeout=180, check=True):
 class Appliance:
     """Drive installer commands and observe the appliance's Docker/filesystem API."""
 
-    def __init__(self, image):
+    def __init__(self, image, *, kernel_btf=True):
         self.id = 'sensor-install-' + uuid.uuid4().hex[:12]
         self.image = image
+        # Appliance kernels built without CONFIG_DEBUG_INFO_BTF expose no /sys/kernel/btf.
+        self.kernel_btf = kernel_btf
         self.backend = self.id + '-backend'
         self.volume = self.id + '-data'
         self.temp = tempfile.TemporaryDirectory(prefix=self.id)
@@ -57,7 +59,8 @@ class Appliance:
                  '--read-only', '-v', f'{self.files}:/fixtures:ro', '--entrypoint', 'python3',
                  self.image, '/test-backend.py'])
         installer = Path(__file__).resolve().parents[1] / 'install.sh'
-        command(['docker', 'run', '-d', '--name', self.id, '--network', self.id,
+        hide_btf = [] if self.kernel_btf else ['--mount', 'type=tmpfs,destination=/sys/kernel/btf,readonly']
+        command(['docker', 'run', '-d', '--name', self.id, '--network', self.id, *hide_btf,
                  '--privileged', '--memory', '3g', '--read-only', '--tmpfs', '/run:rw,size=64m',
                  '--tmpfs', '/tmp:rw,size=64m', '--tmpfs', '/var/log:rw,size=16m',
                  '-v', f'{self.volume}:/data', '-v', f'{self.files}:/fixtures:ro',
@@ -89,14 +92,14 @@ class Appliance:
         result = self.host(['docker', 'inspect', 'groundcover-sensor'])
         return json.loads(result.stdout)[0]
 
-    def wait(self, predicate, timeout=120):
+    def wait(self, predicate, timeout=120, failure='Appliance did not become ready'):
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             if predicate():
                 return
             time.sleep(1)
         logs = self.host(['docker', 'logs', '--tail', '30', 'groundcover-sensor'], check=False)
-        raise AssertionError('Appliance did not become ready:\n' + logs.stdout + logs.stderr)
+        raise AssertionError(failure + ':\n' + logs.stdout + logs.stderr)
 
     def wait_for_sensor(self):
         self.wait(lambda: self.host(['curl', '-fsS', '--max-time', '2',
@@ -104,6 +107,12 @@ class Appliance:
 
     def read(self, path):
         return self.host(['cat', path]).stdout
+
+    def sensor_metric(self, name):
+        exposition = self.host(['curl', '-fsS', '--max-time', '2', 'http://127.0.0.1:9102/metrics'],
+                               check=False).stdout
+        return sum(float(line.split()[-1]) for line in exposition.splitlines()
+                   if line.split(' ')[0].split('{')[0] == name)
 
     def __exit__(self, *_):
         for name in [self.id, self.backend]:
@@ -161,6 +170,19 @@ class DockerInstallTest(unittest.TestCase):
             self.assertNotEqual(appliance.host(['docker', 'inspect', 'groundcover-sensor'],
                                                check=False).returncode, 0)
             self.assertEqual(appliance.read('/data/groundcover/state/positions/keep'), sentinel)
+
+    def test_install_without_kernel_btf_still_reports_host_metrics(self):
+        # Without BTF the eBPF loader fails, and that failure stops every flora module,
+        # host metrics included, while the sensor itself stays healthy.
+        with Appliance(self.image, kernel_btf=False) as appliance:
+            self.assertNotEqual(appliance.host(['test', '-e', '/sys/kernel/btf/vmlinux'],
+                                               check=False).returncode, 0)
+            result = appliance.install()
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            appliance.wait_for_sensor()
+            appliance.wait(lambda: appliance.sensor_metric('exporters_remotewrite_rows_pushed_sum') > 0,
+                           failure='Sensor never pushed host metrics')
+            self.assertEqual(appliance.sensor_metric('flora_listener_error_total'), 0)
 
 
 if __name__ == '__main__':
