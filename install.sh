@@ -57,7 +57,7 @@ USER_CONFIG_PATH="${SENSOR_USER_CONFIG_PATH:-${ENV_DIR}/overrides.yaml}"
 RELEASE_URL_PREFIX="${SENSOR_RELEASE_URL_PREFIX:-https://groundcover.com/artifacts/latest/groundcover-sensor}"
 
 INSTALL_MODE="${SENSOR_INSTALL_MODE:-systemd}"
-DATA_DIR="${SENSOR_DATA_DIR:-/data/groundcover}"
+DOCKER_DATA_DIR="${SENSOR_DOCKER_DATA_DIR:-/data/groundcover}"
 IMAGE_REPOSITORY="${SENSOR_IMAGE_REPOSITORY:-public.ecr.aws/groundcovercom/sensor}"
 HEALTH_URL="http://127.0.0.1:2021/health"
 
@@ -76,7 +76,7 @@ usage() {
     echo ""
     echo "Set SENSOR_VERSION to a release version (e.g. 1.12.383) to install it instead of latest."
     echo "Set SENSOR_INSTALL_MODE=docker to run the sensor as a container instead of a systemd service;"
-    echo "it keeps its configuration and state under SENSOR_DATA_DIR (default /data/groundcover)."
+    echo "it keeps its configuration and state under SENSOR_DOCKER_DATA_DIR (default /data/groundcover)."
     exit 1
 }
 
@@ -356,36 +356,36 @@ resolveLatestVersion() {
 
 prepareDockerSetup() {
     # Download into the data directory: the working directory may be read-only.
-    TARBALL_NAME="${DATA_DIR}/${TARBALL_NAME##*/}"
+    TARBALL_NAME="${DOCKER_DATA_DIR}/${TARBALL_NAME##*/}"
 
-    log_info "Preparing sensor data directory: ${DATA_DIR}"
-    if ! mkdir -p "${DATA_DIR}/state/positions" "${DATA_DIR}/state/vmagent_pq"; then
-        log_error "Cannot write ${DATA_DIR}; set SENSOR_DATA_DIR to a writable, persistent directory"
+    log_info "Preparing sensor data directory: ${DOCKER_DATA_DIR}"
+    if ! mkdir -p "${DOCKER_DATA_DIR}/state/positions" "${DOCKER_DATA_DIR}/state/vmagent_pq"; then
+        log_error "Cannot write ${DOCKER_DATA_DIR}; set SENSOR_DOCKER_DATA_DIR to a writable, persistent directory"
         exit 1
     fi
 
     downloadRelease
     log_info "Extracting sensor configuration"
-    if ! tar -xzf "${TARBALL_NAME}" -C "${DATA_DIR}" config "${SCRAPE_CONFIG_DIR}"; then
+    if ! tar -xzf "${TARBALL_NAME}" -C "${DOCKER_DATA_DIR}" config "${SCRAPE_CONFIG_DIR}"; then
         rm -f "${TARBALL_NAME}"
         log_error "Failed to extract sensor configuration"
         exit 1
     fi
     rm -f "${TARBALL_NAME}"
 
-    prepareSensorConfig "${DATA_DIR}/config/config.yaml"
-    prepareSensorConfig "${DATA_DIR}/${SCRAPE_CONFIG_DIR}/logs-scrape-config.yaml"
-    prepareSensorConfig "${DATA_DIR}/${SCRAPE_CONFIG_DIR}/metrics-scrape-config.yaml"
+    prepareSensorConfig "${DOCKER_DATA_DIR}/config/config.yaml"
+    prepareSensorConfig "${DOCKER_DATA_DIR}/${SCRAPE_CONFIG_DIR}/logs-scrape-config.yaml"
+    prepareSensorConfig "${DOCKER_DATA_DIR}/${SCRAPE_CONFIG_DIR}/metrics-scrape-config.yaml"
 
     # The package ships a positions file relative to its working directory,
     # which is the container's read-only root.
-    sed -i 's|^\([[:space:]]*positionsFile:\).*|\1 /var/run/positions/positions.yaml|' "${DATA_DIR}/config/config.yaml"
+    sed -i 's|^\([[:space:]]*positionsFile:\).*|\1 /var/run/positions/positions.yaml|' "${DOCKER_DATA_DIR}/config/config.yaml"
 
-    if [[ ! -f "${DATA_DIR}/config/overrides.yaml" ]]; then
-        echo "# Overrides Configuration File" > "${DATA_DIR}/config/overrides.yaml"
+    if [[ ! -f "${DOCKER_DATA_DIR}/config/overrides.yaml" ]]; then
+        echo "# Overrides Configuration File" > "${DOCKER_DATA_DIR}/config/overrides.yaml"
     fi
 
-    local env_path="${DATA_DIR}/env.conf"
+    local env_path="${DOCKER_DATA_DIR}/env.conf"
     : > "${env_path}"
     chmod 600 "${env_path}"
     {
@@ -403,10 +403,10 @@ prepareDockerSetup() {
 startDockerSensor() {
     local image="${IMAGE_REPOSITORY}:${SENSOR_VERSION}"
     local mounts=(
-        -v "${DATA_DIR}/config:/config:ro"
-        -v "${DATA_DIR}/${SCRAPE_CONFIG_DIR}:/${SCRAPE_CONFIG_DIR}:ro"
-        -v "${DATA_DIR}/state/positions:/var/run/positions"
-        -v "${DATA_DIR}/state/vmagent_pq:/vmagent_pq"
+        -v "${DOCKER_DATA_DIR}/config:/config:ro"
+        -v "${DOCKER_DATA_DIR}/${SCRAPE_CONFIG_DIR}:/${SCRAPE_CONFIG_DIR}:ro"
+        -v "${DOCKER_DATA_DIR}/state/positions:/var/run/positions"
+        -v "${DOCKER_DATA_DIR}/state/vmagent_pq:/vmagent_pq"
         -v "/:/host:ro"
     )
     # The sensor reads these at fixed paths, with no host prefix.
@@ -433,7 +433,7 @@ startDockerSensor() {
     if ! docker run -d --name "${SENSOR_NAME}" --restart unless-stopped \
         --read-only --tmpfs /tmp --network host \
         --memory "${MAX_MEMORY_LIMIT}" \
-        --env-file "${DATA_DIR}/env.conf" -e "HOSTNAME=$(hostname)" \
+        --env-file "${DOCKER_DATA_DIR}/env.conf" -e "HOSTNAME=$(hostname)" \
         "${mounts[@]}" "${image}" >/dev/null; then
         log_error "Failed to start sensor container"
         exit 1
@@ -460,7 +460,7 @@ uninstallDockerSensor() {
         log_info "Removing sensor container"
         docker rm -f "${SENSOR_NAME}" >/dev/null
     fi
-    log_success "Uninstallation completed; data kept in ${DATA_DIR}"
+    log_success "Uninstallation completed; data kept in ${DOCKER_DATA_DIR}"
 }
 
 checkConnectivity() {
