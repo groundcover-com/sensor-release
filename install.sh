@@ -56,6 +56,11 @@ ENV_PATH="${SENSOR_ENV_PATH:-${ENV_DIR}/env.conf}"
 USER_CONFIG_PATH="${SENSOR_USER_CONFIG_PATH:-${ENV_DIR}/overrides.yaml}"
 RELEASE_URL_PREFIX="${SENSOR_RELEASE_URL_PREFIX:-https://groundcover.com/artifacts/latest/groundcover-sensor}"
 
+INSTALL_MODE="${SENSOR_INSTALL_MODE:-systemd}"
+DATA_DIR="${SENSOR_DATA_DIR:-/data/groundcover}"
+IMAGE_REPOSITORY="${SENSOR_IMAGE_REPOSITORY:-public.ecr.aws/groundcovercom/sensor}"
+HEALTH_URL="http://127.0.0.1:2021/health"
+
 GO_MAX_PROCS="${SENSOR_GO_MAX_PROCS:-2}"
 GO_MEMORY_LIMIT="${SENSOR_GO_MEMORY_LIMIT:-2048MiB}"
 MAX_MEMORY_LIMIT="${SENSOR_MAX_MEMORY_LIMIT:-4G}"
@@ -70,6 +75,8 @@ usage() {
     echo "  uninstall - Remove the sensor and all its configurations"
     echo ""
     echo "Set SENSOR_VERSION to a release version (e.g. 1.12.383) to install it instead of latest."
+    echo "Set SENSOR_INSTALL_MODE=docker to run the sensor as a container on a read-only host;"
+    echo "it needs SENSOR_VERSION and keeps all state under SENSOR_DATA_DIR (default /data/groundcover)."
     exit 1
 }
 
@@ -81,8 +88,19 @@ checkRootPrivileges() {
     log_info "Running with root privileges"
 }
 
+validateInstallMode() {
+    if [[ "${INSTALL_MODE}" != "systemd" && "${INSTALL_MODE}" != "docker" ]]; then
+        log_error "SENSOR_INSTALL_MODE must be 'systemd' or 'docker'"
+        exit 1
+    fi
+}
+
 validateEnvVars() {
     log_info "Validating required environment variables"
+    if [[ "${INSTALL_MODE}" == "docker" && "${SENSOR_VERSION}" == "latest" ]]; then
+        log_error "Docker installation requires SENSOR_VERSION in X.Y.Z format; the sensor image has no 'latest' tag"
+        exit 1
+    fi
     if [[ "${SENSOR_VERSION}" != "latest" ]]; then
         if [[ ! "${SENSOR_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             log_error "SENSOR_VERSION must be 'latest' or a version in X.Y.Z format (e.g. 1.12.383)"
@@ -110,6 +128,7 @@ checkCurl() {
 }
 
 downloadRelease() {
+    local tarball_path="${1}"
     log_info "Detecting system architecture"
     local arch
     arch=$(uname -m)
@@ -136,10 +155,10 @@ downloadRelease() {
     
     checkCurl
     
-    http_code=$(curl -s -w "%{http_code}" -L -o "${TARBALL_NAME}" "${download_url}")
-        
+    http_code=$(curl -s -w "%{http_code}" -L -o "${tarball_path}" "${download_url}")
+
     if [[ "${http_code}" != "200" ]]; then
-        rm -f "${TARBALL_NAME}"
+        rm -f "${tarball_path}"
         log_error "Failed to download release package"
         exit 1
     fi
@@ -321,6 +340,107 @@ uninstallSensor() {
 
 }
 
+checkDocker() {
+    if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
+        log_error "Docker installation requires a running Docker daemon"
+        exit 1
+    fi
+}
+
+prepareDockerSetup() {
+    local tarball_path="${DATA_DIR}/sensor.tar.gz"
+
+    log_info "Preparing sensor data directory: ${DATA_DIR}"
+    mkdir -p "${DATA_DIR}/state/positions" "${DATA_DIR}/state/vmagent_pq"
+
+    downloadRelease "${tarball_path}"
+    log_info "Extracting sensor configuration"
+    tar -xzf "${tarball_path}" -C "${DATA_DIR}" config "${SCRAPE_CONFIG_DIR}"
+    rm -f "${tarball_path}"
+
+    prepareSensorConfig "${DATA_DIR}/config/config.yaml"
+    prepareSensorConfig "${DATA_DIR}/${SCRAPE_CONFIG_DIR}/logs-scrape-config.yaml"
+    prepareSensorConfig "${DATA_DIR}/${SCRAPE_CONFIG_DIR}/metrics-scrape-config.yaml"
+
+    # The package ships a positions file relative to its working directory,
+    # which is the container's read-only root.
+    sed -i 's|^\([[:space:]]*positionsFile:\).*|\1 /var/run/positions/positions.yaml|' "${DATA_DIR}/config/config.yaml"
+
+    if [[ ! -f "${DATA_DIR}/config/overrides.yaml" ]]; then
+        echo "# Overrides Configuration File" > "${DATA_DIR}/config/overrides.yaml"
+    fi
+
+    local env_path="${DATA_DIR}/env.conf"
+    : > "${env_path}"
+    chmod 600 "${env_path}"
+    {
+        echo "API_KEY=${API_KEY}"
+        echo "CONFIG_OVERRIDES_PATH=/config/overrides.yaml"
+        echo "FLORA_EBPFENABLED=false"
+        echo "FLORA_PROMETHEUSSERVER_ENABLED=false"
+        echo "FLORA_CONTAINERREPOSITORY_TRACKEDCONTAINERTYPE=docker"
+        echo "FLORA_SYSTEMINFO_HOSTMOUNTPATH=/host"
+        echo "GOMAXPROCS=${GO_MAX_PROCS}"
+        echo "GOMEMLIMIT=${GO_MEMORY_LIMIT}"
+    } >> "${env_path}"
+}
+
+startDockerSensor() {
+    local image="${IMAGE_REPOSITORY}:${SENSOR_VERSION}"
+    local mounts=(
+        -v "${DATA_DIR}/config:/config:ro"
+        -v "${DATA_DIR}/${SCRAPE_CONFIG_DIR}:/${SCRAPE_CONFIG_DIR}:ro"
+        -v "${DATA_DIR}/state/positions:/var/run/positions"
+        -v "${DATA_DIR}/state/vmagent_pq:/vmagent_pq"
+        -v "/:/host:ro"
+    )
+    # The sensor reads these at fixed paths, with no host prefix.
+    local path
+    for path in /var/log/journal /run/log/journal /etc/machine-id /var/run/docker.sock; do
+        if [[ -e "${path}" ]]; then
+            mounts+=(-v "${path}:${path}:ro")
+        fi
+    done
+
+    log_info "Pulling sensor image ${image}"
+    docker pull "${image}" >/dev/null
+
+    if docker inspect "${SENSOR_NAME}" >/dev/null 2>&1; then
+        log_info "Replacing existing sensor container"
+        docker rm -f "${SENSOR_NAME}" >/dev/null
+    fi
+
+    log_info "Starting sensor container"
+    docker run -d --name "${SENSOR_NAME}" --restart unless-stopped \
+        --read-only --tmpfs /tmp --network host \
+        --memory "${MAX_MEMORY_LIMIT}" \
+        --env-file "${DATA_DIR}/env.conf" -e "HOSTNAME=$(hostname)" \
+        "${mounts[@]}" "${image}" >/dev/null
+
+    local attempt
+    for attempt in $(seq 1 60); do
+        if curl -fsS --max-time 2 "${HEALTH_URL}" >/dev/null 2>&1; then
+            log_success "groundcover sensor is up and running"
+            log_info "To view sensor logs: docker logs ${SENSOR_NAME}"
+            return 0
+        fi
+        sleep 2
+    done
+
+    log_error "Sensor did not become healthy. Recent logs:"
+    docker logs --tail 50 "${SENSOR_NAME}"
+    exit 1
+}
+
+uninstallDockerSensor() {
+    log_info "Starting uninstallation process"
+    if docker inspect "${SENSOR_NAME}" >/dev/null 2>&1; then
+        log_info "Removing sensor container"
+        docker rm -f "${SENSOR_NAME}" >/dev/null
+    fi
+    log_success "Uninstallation completed; data kept in ${DATA_DIR}"
+}
+
 checkConnectivity() {
     log_info "Checking connectivity to groundcover backend"
     local health_url="https://${GC_DOMAIN}/health/live"
@@ -341,8 +461,15 @@ checkConnectivity() {
 install() {
     validateEnvVars
     printBanner
+    if [[ "${INSTALL_MODE}" == "docker" ]]; then
+        checkDocker
+        checkConnectivity
+        prepareDockerSetup
+        startDockerSensor
+        return
+    fi
     checkConnectivity
-    downloadRelease
+    downloadRelease "${TARBALL_NAME}"
     prepareSetup
     installSensor
     startService
@@ -350,12 +477,18 @@ install() {
 
 uninstall() {
     printBanner
+    if [[ "${INSTALL_MODE}" == "docker" ]]; then
+        checkDocker
+        uninstallDockerSensor
+        return
+    fi
     uninstallSensor
 }
 
 main() {
     checkRootPrivileges
-    
+    validateInstallMode
+
     case "$1" in
         "install")
             install
