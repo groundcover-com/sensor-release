@@ -434,8 +434,9 @@ startDockerSensor() {
     fi
 
     log_info "Starting sensor container"
+    # NET_ADMIN lets flora read per-process CPU and disk delay through the kernel's taskstats interface.
     if ! docker run -d --name "${SENSOR_NAME}" --restart unless-stopped \
-        --read-only --tmpfs /tmp --network host \
+        --read-only --tmpfs /tmp --network host --cap-add NET_ADMIN \
         --memory "${MAX_MEMORY_LIMIT}" \
         --env-file "${DOCKER_DATA_DIR}/env.conf" -e "HOSTNAME=$(hostname)" \
         "${mounts[@]}" "${image}" >/dev/null; then

@@ -143,6 +143,7 @@ class DockerInstallTest(unittest.TestCase):
             self.assertEqual(sensor['Config']['Image'],
                              'public.ecr.aws/groundcovercom/sensor:' + appliance.version)
             self.assertTrue(sensor['HostConfig']['ReadonlyRootfs'])
+            self.assertEqual(sensor['HostConfig']['CapAdd'], ['NET_ADMIN'])
             self.assertEqual(sensor['HostConfig']['RestartPolicy']['Name'], 'unless-stopped')
             self.assertIn('FLORA_EBPFENABLED=false', sensor['Config']['Env'])
             self.assertIn('API_KEY=' + appliance.api_key, sensor['Config']['Env'])
