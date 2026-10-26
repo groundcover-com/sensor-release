@@ -13,8 +13,10 @@ a read-only container root and persistent state under `SENSOR_DOCKER_DATA_DIR`
 daemon restarts and host reboots. `SENSOR_RELIABLE_JOURNAL_DELIVERY=true` opts in
 to reliable journald delivery (`reliableDelivery.enabled` under `journalConfig`),
 so journal logs written while the host is offline are sent after it reconnects;
-sensor releases without that feature ignore the setting. Reinstall updates the
-container while preserving that state, the earlier opt-in (kept in
+sensor releases without that feature ignore the setting. Metrics written while
+offline wait in an on-disk queue under the data directory, capped by
+`SENSOR_METRICS_QUEUE_MAX_SIZE` (default `20GB`). Reinstall updates the
+container while preserving that state, the earlier opt-in and queue cap (kept in
 `installer.conf` in the data directory) and lines the customer added to the data
 directory's `env.conf`. Uninstall removes the managed container and preserves
 the data directory.

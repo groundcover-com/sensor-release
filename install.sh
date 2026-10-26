@@ -59,6 +59,7 @@ RELEASE_URL_PREFIX="${SENSOR_RELEASE_URL_PREFIX:-https://groundcover.com/artifac
 INSTALL_MODE="${SENSOR_INSTALL_MODE:-systemd}"
 DOCKER_DATA_DIR="${SENSOR_DOCKER_DATA_DIR:-/data/groundcover}"
 IMAGE_REPOSITORY="${SENSOR_IMAGE_REPOSITORY:-public.ecr.aws/groundcovercom/sensor}"
+METRICS_QUEUE_MAX_SIZE="${SENSOR_METRICS_QUEUE_MAX_SIZE:-}"
 RELIABLE_JOURNAL_DELIVERY="${SENSOR_RELIABLE_JOURNAL_DELIVERY:-}"
 HEALTH_URL="http://127.0.0.1:2021/health"
 
@@ -78,6 +79,7 @@ usage() {
     echo "Set SENSOR_VERSION to a release version (e.g. 1.12.383) to install it instead of latest."
     echo "Set SENSOR_INSTALL_MODE=docker to run the sensor as a container instead of a systemd service;"
     echo "it keeps its configuration and state under SENSOR_DOCKER_DATA_DIR (default /data/groundcover)."
+    echo "In Docker mode, SENSOR_METRICS_QUEUE_MAX_SIZE caps the metrics kept on disk while offline (default 20GB)."
     echo "In Docker mode, SENSOR_RELIABLE_JOURNAL_DELIVERY=true resends journal logs written while offline;"
     echo "the choice is kept for later installs. Lines you add to the data directory's env.conf are kept too."
     exit 1
@@ -94,6 +96,10 @@ checkRootPrivileges() {
 validateInstallMode() {
     if [[ "${INSTALL_MODE}" != "systemd" && "${INSTALL_MODE}" != "docker" ]]; then
         log_error "SENSOR_INSTALL_MODE must be 'systemd' or 'docker'"
+        exit 1
+    fi
+    if [[ -n "${METRICS_QUEUE_MAX_SIZE}" && ! "${METRICS_QUEUE_MAX_SIZE}" =~ ^[1-9][0-9]*(KB|MB|GB|TB|KiB|MiB|GiB|TiB)?$ ]]; then
+        log_error "SENSOR_METRICS_QUEUE_MAX_SIZE must be a size such as 20GB or 512MiB"
         exit 1
     fi
     if [[ -n "${RELIABLE_JOURNAL_DELIVERY}" && "${RELIABLE_JOURNAL_DELIVERY}" != "true" && "${RELIABLE_JOURNAL_DELIVERY}" != "false" ]]; then
@@ -387,14 +393,20 @@ prepareDockerSetup() {
     # The package ships a positions file relative to its working directory,
     # which is the container's read-only root.
     sed -i 's|^\([[:space:]]*positionsFile:\).*|\1 /var/run/positions/positions.yaml|' "${DOCKER_DATA_DIR}/config/config.yaml"
-
     # Choices from an earlier install stay unless this install sets them again.
     local settings="${DOCKER_DATA_DIR}/installer.conf"
-    if [[ -z "${RELIABLE_JOURNAL_DELIVERY}" && -f "${settings}" ]]; then
-        RELIABLE_JOURNAL_DELIVERY=$(sed -n 's/^SENSOR_RELIABLE_JOURNAL_DELIVERY=//p' "${settings}")
+    if [[ -f "${settings}" ]]; then
+        RELIABLE_JOURNAL_DELIVERY="${RELIABLE_JOURNAL_DELIVERY:-$(sed -n 's/^SENSOR_RELIABLE_JOURNAL_DELIVERY=//p' "${settings}")}"
+        METRICS_QUEUE_MAX_SIZE="${METRICS_QUEUE_MAX_SIZE:-$(sed -n 's/^SENSOR_METRICS_QUEUE_MAX_SIZE=//p' "${settings}")}"
     fi
     RELIABLE_JOURNAL_DELIVERY="${RELIABLE_JOURNAL_DELIVERY:-false}"
-    echo "SENSOR_RELIABLE_JOURNAL_DELIVERY=${RELIABLE_JOURNAL_DELIVERY}" > "${settings}"
+    METRICS_QUEUE_MAX_SIZE="${METRICS_QUEUE_MAX_SIZE:-20GB}"
+    printf 'SENSOR_RELIABLE_JOURNAL_DELIVERY=%s\nSENSOR_METRICS_QUEUE_MAX_SIZE=%s\n' \
+        "${RELIABLE_JOURNAL_DELIVERY}" "${METRICS_QUEUE_MAX_SIZE}" > "${settings}"
+
+    # Offline, metrics wait in this on-disk queue under the data directory; the oldest go first when it is full.
+    sed -i -e "s|^\([[:space:]]*maxDiskUsagePerURL:\).*|\1 ${METRICS_QUEUE_MAX_SIZE}|" \
+        -e 's|^\([[:space:]]*tmpDataPath:\).*|\1 /vmagent_pq/vmagent-remotewrite-data|' "${DOCKER_DATA_DIR}/config/config.yaml"
     # Written into config.yaml: the sensor may ignore an environment variable for a key the release config lacks.
     if [[ "${RELIABLE_JOURNAL_DELIVERY}" == "true" ]]; then
         awk '{ print } /^[[:space:]]*journalConfig:[[:space:]]*$/ { match($0, /^ */); pad = substr($0, 1, RLENGTH); print pad "  reliableDelivery:"; print pad "    enabled: true" }' \
