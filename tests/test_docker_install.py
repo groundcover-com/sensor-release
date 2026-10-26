@@ -156,6 +156,8 @@ class DockerInstallTest(unittest.TestCase):
             self.assertIn(appliance.environment, config)
             self.assertIn('/var/run/positions/positions.yaml', config)
             self.assertNotIn('<GC_PLACEHOLDER_', config)
+            # Journal logs wait in journald while offline; only reliable delivery resends them.
+            self.assertRegex(config, r'(?m)^( *)journalConfig: *\n\1  reliableDelivery:\n\1    enabled: true$')
 
             # Reinstall is the customer's update path; existing state must survive.
             sentinel = 'state-' + uuid.uuid4().hex

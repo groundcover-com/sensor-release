@@ -10,7 +10,10 @@ uploaded bundle, Docker Compose, or writable `/etc` or `/opt`. It downloads the
 release configuration and runs the matching published image with eBPF disabled,
 a read-only container root and persistent state under `SENSOR_DOCKER_DATA_DIR`
 (default `/data/groundcover`). Docker's restart policy starts it again after
-daemon restarts and host reboots. Reinstall updates the container while
+daemon restarts and host reboots. Docker mode also turns on reliable journald
+delivery (`reliableDelivery.enabled` under `journalConfig`), so journal logs
+written while the host is offline are sent after it reconnects; sensor releases
+without that feature ignore the setting. Reinstall updates the container while
 preserving that state. Uninstall removes the managed container and preserves
 the data directory.
 

@@ -380,6 +380,10 @@ prepareDockerSetup() {
     # The package ships a positions file relative to its working directory,
     # which is the container's read-only root.
     sed -i 's|^\([[:space:]]*positionsFile:\).*|\1 /var/run/positions/positions.yaml|' "${DOCKER_DATA_DIR}/config/config.yaml"
+    # Offline appliances keep journal logs in journald; reliable delivery resends them on reconnect.
+    awk '{ print } /^[[:space:]]*journalConfig:[[:space:]]*$/ { match($0, /^ */); pad = substr($0, 1, RLENGTH); print pad "  reliableDelivery:"; print pad "    enabled: true" }' \
+        "${DOCKER_DATA_DIR}/config/config.yaml" > "${DOCKER_DATA_DIR}/config/config.yaml.tmp" \
+        && mv "${DOCKER_DATA_DIR}/config/config.yaml.tmp" "${DOCKER_DATA_DIR}/config/config.yaml"
 
     if [[ ! -f "${DOCKER_DATA_DIR}/config/overrides.yaml" ]]; then
         echo "# Overrides Configuration File" > "${DOCKER_DATA_DIR}/config/overrides.yaml"
