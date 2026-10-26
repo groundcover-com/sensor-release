@@ -59,6 +59,8 @@ RELEASE_URL_PREFIX="${SENSOR_RELEASE_URL_PREFIX:-https://groundcover.com/artifac
 INSTALL_MODE="${SENSOR_INSTALL_MODE:-systemd}"
 DOCKER_DATA_DIR="${SENSOR_DOCKER_DATA_DIR:-/data/groundcover}"
 IMAGE_REPOSITORY="${SENSOR_IMAGE_REPOSITORY:-public.ecr.aws/groundcovercom/sensor}"
+# 45 days of a busy appliance's metrics (about 400 MB a day compressed) plus a margin.
+METRICS_QUEUE_MAX_SIZE="${SENSOR_METRICS_QUEUE_MAX_SIZE:-20GB}"
 HEALTH_URL="http://127.0.0.1:2021/health"
 
 GO_MAX_PROCS="${SENSOR_GO_MAX_PROCS:-2}"
@@ -77,6 +79,7 @@ usage() {
     echo "Set SENSOR_VERSION to a release version (e.g. 1.12.383) to install it instead of latest."
     echo "Set SENSOR_INSTALL_MODE=docker to run the sensor as a container instead of a systemd service;"
     echo "it keeps its configuration and state under SENSOR_DOCKER_DATA_DIR (default /data/groundcover)."
+    echo "In Docker mode, SENSOR_METRICS_QUEUE_MAX_SIZE caps the metrics kept on disk while offline (default 20GB)."
     exit 1
 }
 
@@ -91,6 +94,10 @@ checkRootPrivileges() {
 validateInstallMode() {
     if [[ "${INSTALL_MODE}" != "systemd" && "${INSTALL_MODE}" != "docker" ]]; then
         log_error "SENSOR_INSTALL_MODE must be 'systemd' or 'docker'"
+        exit 1
+    fi
+    if [[ ! "${METRICS_QUEUE_MAX_SIZE}" =~ ^[1-9][0-9]*(KB|MB|GB|TB|KiB|MiB|GiB|TiB)?$ ]]; then
+        log_error "SENSOR_METRICS_QUEUE_MAX_SIZE must be a size such as 20GB or 512MiB"
         exit 1
     fi
 }
@@ -380,6 +387,9 @@ prepareDockerSetup() {
     # The package ships a positions file relative to its working directory,
     # which is the container's read-only root.
     sed -i 's|^\([[:space:]]*positionsFile:\).*|\1 /var/run/positions/positions.yaml|' "${DOCKER_DATA_DIR}/config/config.yaml"
+    # Offline, metrics wait in this on-disk queue under the data directory; the oldest go first when it is full.
+    sed -i -e "s|^\([[:space:]]*maxDiskUsagePerURL:\).*|\1 ${METRICS_QUEUE_MAX_SIZE}|" \
+        -e 's|^\([[:space:]]*tmpDataPath:\).*|\1 /vmagent_pq/vmagent-remotewrite-data|' "${DOCKER_DATA_DIR}/config/config.yaml"
     # Offline appliances keep journal logs in journald; reliable delivery resends them on reconnect.
     awk '{ print } /^[[:space:]]*journalConfig:[[:space:]]*$/ { match($0, /^ */); pad = substr($0, 1, RLENGTH); print pad "  reliableDelivery:"; print pad "    enabled: true" }' \
         "${DOCKER_DATA_DIR}/config/config.yaml" > "${DOCKER_DATA_DIR}/config/config.yaml.tmp" \
