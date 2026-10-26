@@ -157,17 +157,29 @@ class DockerInstallTest(unittest.TestCase):
             self.assertIn(appliance.environment, config)
             self.assertIn('/var/run/positions/positions.yaml', config)
             self.assertNotIn('<GC_PLACEHOLDER_', config)
-            # Journal logs wait in journald while offline; only reliable delivery resends them.
-            self.assertRegex(config, r'(?m)^( *)journalConfig: *\n\1  reliableDelivery:\n\1    enabled: true$')
+            reliable = r'(?m)^( *)journalConfig: *\n\1  reliableDelivery:\n\1    enabled: true$'
+            self.assertNotRegex(config, reliable, 'reliable journald delivery is opt-in')
 
-            # Reinstall is the customer's update path; existing state must survive.
+            # Reinstall is the customer's update path; existing state and choices must survive.
             sentinel = 'state-' + uuid.uuid4().hex
             appliance.host(['sh', '-c', 'printf "%s" "$1" > "$2"', 'sh', sentinel,
                             '/data/groundcover/state/positions/keep'])
-            result = appliance.install()
+            customer_setting = 'GC_EXAMPLE_SETTING=' + uuid.uuid4().hex
+            appliance.host(['sh', '-c', 'echo "$1" >> /data/groundcover/env.conf', 'sh', customer_setting])
+            result = appliance.install(SENSOR_RELIABLE_JOURNAL_DELIVERY='true')
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             appliance.wait_for_sensor()
             self.assertEqual(appliance.read('/data/groundcover/state/positions/keep'), sentinel)
+            self.assertRegex(appliance.read('/data/groundcover/config/config.yaml'), reliable)
+            self.assertIn(customer_setting, appliance.sensor()['Config']['Env'])
+
+            # A plain reinstall keeps the earlier opt-in and the customer's own settings.
+            result = appliance.install()
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            appliance.wait_for_sensor()
+            self.assertRegex(appliance.read('/data/groundcover/config/config.yaml'), reliable)
+            self.assertIn(customer_setting, appliance.sensor()['Config']['Env'])
+            self.assertIn('API_KEY=' + appliance.api_key, appliance.sensor()['Config']['Env'])
 
             # Removing a container must not remove the persistent data directory.
             appliance.host(['env', 'SENSOR_INSTALL_MODE=docker', 'bash', '/install.sh', 'uninstall'])

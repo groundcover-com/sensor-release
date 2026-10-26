@@ -59,6 +59,7 @@ RELEASE_URL_PREFIX="${SENSOR_RELEASE_URL_PREFIX:-https://groundcover.com/artifac
 INSTALL_MODE="${SENSOR_INSTALL_MODE:-systemd}"
 DOCKER_DATA_DIR="${SENSOR_DOCKER_DATA_DIR:-/data/groundcover}"
 IMAGE_REPOSITORY="${SENSOR_IMAGE_REPOSITORY:-public.ecr.aws/groundcovercom/sensor}"
+RELIABLE_JOURNAL_DELIVERY="${SENSOR_RELIABLE_JOURNAL_DELIVERY:-}"
 HEALTH_URL="http://127.0.0.1:2021/health"
 
 GO_MAX_PROCS="${SENSOR_GO_MAX_PROCS:-2}"
@@ -77,6 +78,8 @@ usage() {
     echo "Set SENSOR_VERSION to a release version (e.g. 1.12.383) to install it instead of latest."
     echo "Set SENSOR_INSTALL_MODE=docker to run the sensor as a container instead of a systemd service;"
     echo "it keeps its configuration and state under SENSOR_DOCKER_DATA_DIR (default /data/groundcover)."
+    echo "In Docker mode, SENSOR_RELIABLE_JOURNAL_DELIVERY=true resends journal logs written while offline;"
+    echo "the choice is kept for later installs. Lines you add to the data directory's env.conf are kept too."
     exit 1
 }
 
@@ -91,6 +94,10 @@ checkRootPrivileges() {
 validateInstallMode() {
     if [[ "${INSTALL_MODE}" != "systemd" && "${INSTALL_MODE}" != "docker" ]]; then
         log_error "SENSOR_INSTALL_MODE must be 'systemd' or 'docker'"
+        exit 1
+    fi
+    if [[ -n "${RELIABLE_JOURNAL_DELIVERY}" && "${RELIABLE_JOURNAL_DELIVERY}" != "true" && "${RELIABLE_JOURNAL_DELIVERY}" != "false" ]]; then
+        log_error "SENSOR_RELIABLE_JOURNAL_DELIVERY must be 'true' or 'false'"
         exit 1
     fi
 }
@@ -380,16 +387,31 @@ prepareDockerSetup() {
     # The package ships a positions file relative to its working directory,
     # which is the container's read-only root.
     sed -i 's|^\([[:space:]]*positionsFile:\).*|\1 /var/run/positions/positions.yaml|' "${DOCKER_DATA_DIR}/config/config.yaml"
-    # Offline appliances keep journal logs in journald; reliable delivery resends them on reconnect.
-    awk '{ print } /^[[:space:]]*journalConfig:[[:space:]]*$/ { match($0, /^ */); pad = substr($0, 1, RLENGTH); print pad "  reliableDelivery:"; print pad "    enabled: true" }' \
-        "${DOCKER_DATA_DIR}/config/config.yaml" > "${DOCKER_DATA_DIR}/config/config.yaml.tmp" \
-        && mv "${DOCKER_DATA_DIR}/config/config.yaml.tmp" "${DOCKER_DATA_DIR}/config/config.yaml"
+
+    # Choices from an earlier install stay unless this install sets them again.
+    local settings="${DOCKER_DATA_DIR}/installer.conf"
+    if [[ -z "${RELIABLE_JOURNAL_DELIVERY}" && -f "${settings}" ]]; then
+        RELIABLE_JOURNAL_DELIVERY=$(sed -n 's/^SENSOR_RELIABLE_JOURNAL_DELIVERY=//p' "${settings}")
+    fi
+    RELIABLE_JOURNAL_DELIVERY="${RELIABLE_JOURNAL_DELIVERY:-false}"
+    echo "SENSOR_RELIABLE_JOURNAL_DELIVERY=${RELIABLE_JOURNAL_DELIVERY}" > "${settings}"
+    # Written into config.yaml: the sensor may ignore an environment variable for a key the release config lacks.
+    if [[ "${RELIABLE_JOURNAL_DELIVERY}" == "true" ]]; then
+        awk '{ print } /^[[:space:]]*journalConfig:[[:space:]]*$/ { match($0, /^ */); pad = substr($0, 1, RLENGTH); print pad "  reliableDelivery:"; print pad "    enabled: true" }' \
+            "${DOCKER_DATA_DIR}/config/config.yaml" > "${DOCKER_DATA_DIR}/config/config.yaml.tmp" \
+            && mv "${DOCKER_DATA_DIR}/config/config.yaml.tmp" "${DOCKER_DATA_DIR}/config/config.yaml"
+    fi
 
     if [[ ! -f "${DOCKER_DATA_DIR}/config/overrides.yaml" ]]; then
         echo "# Overrides Configuration File" > "${DOCKER_DATA_DIR}/config/overrides.yaml"
     fi
 
     local env_path="${DOCKER_DATA_DIR}/env.conf"
+    local managed='^(API_KEY|CONFIG_OVERRIDES_PATH|FLORA_EBPFENABLED|FLORA_PROMETHEUSSERVER_ENABLED|FLORA_CONTAINERREPOSITORY_TRACKEDCONTAINERTYPE|FLORA_SYSTEMINFO_HOSTMOUNTPATH|GOMAXPROCS|GOMEMLIMIT)='
+    local customer=""
+    if [[ -f "${env_path}" ]]; then
+        customer=$(grep -Ev "${managed}" "${env_path}" || true)
+    fi
     : > "${env_path}"
     chmod 600 "${env_path}"
     {
@@ -401,6 +423,9 @@ prepareDockerSetup() {
         echo "FLORA_SYSTEMINFO_HOSTMOUNTPATH=/host"
         echo "GOMAXPROCS=${GO_MAX_PROCS}"
         echo "GOMEMLIMIT=${GO_MEMORY_LIMIT}"
+        if [[ -n "${customer}" ]]; then
+            printf '%s\n' "${customer}"
+        fi
     } >> "${env_path}"
 }
 
