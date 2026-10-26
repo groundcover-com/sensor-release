@@ -15,7 +15,7 @@ delivery (`reliableDelivery.enabled` under `journalConfig`), so journal logs
 written while the host is offline are sent after it reconnects; sensor releases
 without that feature ignore the setting. Metrics written while offline wait in an
 on-disk queue under the data directory, capped by `SENSOR_METRICS_QUEUE_MAX_SIZE`
-(default `20GB`, about 45 days of a busy appliance). Reinstall updates the container while
+(default `20GB`). Reinstall updates the container while
 preserving that state. Uninstall removes the managed container and preserves
 the data directory.
 
