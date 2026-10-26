@@ -16,7 +16,7 @@ so journal logs written while the host is offline are sent after it reconnects;
 sensor releases without that feature ignore the setting. Metrics written while
 offline wait in an on-disk queue under the data directory, capped by
 `SENSOR_METRICS_QUEUE_MAX_SIZE` (default `20GB`). Reinstall updates the
-container while preserving that state, the earlier opt-in (kept in
+container while preserving that state, the earlier opt-in and queue cap (kept in
 `installer.conf` in the data directory) and lines the customer added to the data
 directory's `env.conf`. Uninstall removes the managed container and preserves
 the data directory.

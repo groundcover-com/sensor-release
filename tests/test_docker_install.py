@@ -169,25 +169,22 @@ class DockerInstallTest(unittest.TestCase):
                             '/data/groundcover/state/positions/keep'])
             customer_setting = 'GC_EXAMPLE_SETTING=' + uuid.uuid4().hex
             appliance.host(['sh', '-c', 'echo "$1" >> /data/groundcover/env.conf', 'sh', customer_setting])
-            result = appliance.install(SENSOR_RELIABLE_JOURNAL_DELIVERY='true')
+            result = appliance.install(SENSOR_RELIABLE_JOURNAL_DELIVERY='true', SENSOR_METRICS_QUEUE_MAX_SIZE='5GB')
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             appliance.wait_for_sensor()
             self.assertEqual(appliance.read('/data/groundcover/state/positions/keep'), sentinel)
             self.assertRegex(appliance.read('/data/groundcover/config/config.yaml'), reliable)
             self.assertIn(customer_setting, appliance.sensor()['Config']['Env'])
 
-            # A plain reinstall keeps the earlier opt-in and the customer's own settings.
+            # A plain reinstall keeps the earlier choices and the customer's own settings.
             result = appliance.install()
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             appliance.wait_for_sensor()
             self.assertRegex(appliance.read('/data/groundcover/config/config.yaml'), reliable)
+            self.assertRegex(appliance.read('/data/groundcover/config/config.yaml'), r'(?m)^ *maxDiskUsagePerURL: 5GB$')
             self.assertIn(customer_setting, appliance.sensor()['Config']['Env'])
             self.assertIn('API_KEY=' + appliance.api_key, appliance.sensor()['Config']['Env'])
 
-            result = appliance.install(SENSOR_METRICS_QUEUE_MAX_SIZE='5GB')
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            appliance.wait_for_sensor()
-            self.assertRegex(appliance.read('/data/groundcover/config/config.yaml'), r'(?m)^ *maxDiskUsagePerURL: 5GB$')
             result = appliance.install(SENSOR_METRICS_QUEUE_MAX_SIZE='lots')
             self.assertNotEqual(result.returncode, 0)
             self.assertIn('SENSOR_METRICS_QUEUE_MAX_SIZE', result.stdout + result.stderr)
