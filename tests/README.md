@@ -10,13 +10,15 @@ uploaded bundle, Docker Compose, or writable `/etc` or `/opt`. It downloads the
 release configuration and runs the matching published image with eBPF disabled,
 a read-only container root and persistent state under `SENSOR_DOCKER_DATA_DIR`
 (default `/data/groundcover`). Docker's restart policy starts it again after
-daemon restarts and host reboots. Docker mode also turns on reliable journald
-delivery (`reliableDelivery.enabled` under `journalConfig`), so journal logs
-written while the host is offline are sent after it reconnects; sensor releases
-without that feature ignore the setting. Metrics written while offline wait in an
-on-disk queue under the data directory, capped by `SENSOR_METRICS_QUEUE_MAX_SIZE`
-(default `20GB`). Reinstall updates the container while
-preserving that state. Uninstall removes the managed container and preserves
+daemon restarts and host reboots. `SENSOR_RELIABLE_JOURNAL_DELIVERY=true` opts in
+to reliable journald delivery (`reliableDelivery.enabled` under `journalConfig`),
+so journal logs written while the host is offline are sent after it reconnects;
+sensor releases without that feature ignore the setting. Metrics written while
+offline wait in an on-disk queue under the data directory, capped by
+`SENSOR_METRICS_QUEUE_MAX_SIZE` (default `20GB`). Reinstall updates the
+container while preserving that state, the earlier opt-in (kept in
+`installer.conf` in the data directory) and lines the customer added to the data
+directory's `env.conf`. Uninstall removes the managed container and preserves
 the data directory.
 
 The published image has no `latest` tag, so an unpinned Docker install resolves
