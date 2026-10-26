@@ -58,7 +58,7 @@ class Appliance:
         command(['docker', 'run', '-d', '--name', self.backend, '--network', self.id,
                  '--network-alias', 'groundcover-test', '--network-alias', 'metrics-http.groundcover-test',
                  '--read-only', '-v', f'{self.files}:/fixtures:ro', '--entrypoint', 'python3',
-                 self.image, '/test-backend.py'])
+                 self.image, '/fake_backend.py'])
         installer = Path(__file__).resolve().parents[1] / 'install.sh'
         hide_btf = [] if self.kernel_btf else ['--mount', 'type=tmpfs,destination=/sys/kernel/btf,readonly']
         command(['docker', 'run', '-d', '--name', self.id, '--network', self.id, *hide_btf,
