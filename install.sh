@@ -59,7 +59,6 @@ RELEASE_URL_PREFIX="${SENSOR_RELEASE_URL_PREFIX:-https://groundcover.com/artifac
 INSTALL_MODE="${SENSOR_INSTALL_MODE:-systemd}"
 DOCKER_DATA_DIR="${SENSOR_DOCKER_DATA_DIR:-/data/groundcover}"
 IMAGE_REPOSITORY="${SENSOR_IMAGE_REPOSITORY:-public.ecr.aws/groundcovercom/sensor}"
-# 45 days of a busy appliance's metrics (about 400 MB a day compressed) plus a margin.
 METRICS_QUEUE_MAX_SIZE="${SENSOR_METRICS_QUEUE_MAX_SIZE:-20GB}"
 HEALTH_URL="http://127.0.0.1:2021/health"
 
