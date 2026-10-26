@@ -1,6 +1,7 @@
 """Run with: python3 -m unittest discover -s tests -v.
 
-Requires Docker with privileged containers and outbound GitHub/ECR access.
+Requires Docker with privileged containers (the appliance runs its own Docker
+daemon) and outbound access to Docker Hub, the Alpine mirror, GitHub and public ECR.
 The driver runs the public installer against a read-only appliance fixture,
 an actual Docker 25.0.3 daemon and the published sensor image. It never uses
 systemd or a real groundcover tenant. All owned resources are removed.
