@@ -2,20 +2,16 @@ name: Installer tests
 
 on:
   pull_request:
-  push:
-    branches: [main]
-
-permissions:
-  contents: read
+    paths:
+      - install.sh
+      - tests/**
+      - .github/workflows/installer-tests.yml
 
 jobs:
-  docker-install:
-    name: Docker installer acceptance
+  test:
+    name: Installer function tests
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v6
-      - name: Check installer syntax
-        run: bash -n install.sh
-      - name: Exercise installation on a read-only appliance
-        run: python3 -m unittest discover -s tests -v
+      - uses: actions/checkout@v4
+      - run: bash -n install.sh
+      - run: python3 -m unittest discover -s tests -v

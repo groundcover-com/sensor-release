@@ -56,14 +56,6 @@ ENV_PATH="${SENSOR_ENV_PATH:-${ENV_DIR}/env.conf}"
 USER_CONFIG_PATH="${SENSOR_USER_CONFIG_PATH:-${ENV_DIR}/overrides.yaml}"
 RELEASE_URL_PREFIX="${SENSOR_RELEASE_URL_PREFIX:-https://groundcover.com/artifacts/latest/groundcover-sensor}"
 
-INSTALL_MODE="${SENSOR_INSTALL_MODE:-systemd}"
-DOCKER_DATA_DIR="${SENSOR_DOCKER_DATA_DIR:-/data/groundcover}"
-IMAGE_REPOSITORY="${SENSOR_IMAGE_REPOSITORY:-public.ecr.aws/groundcovercom/sensor}"
-METRICS_QUEUE_MAX_SIZE="${SENSOR_METRICS_QUEUE_MAX_SIZE:-}"
-RELIABLE_JOURNAL_DELIVERY="${SENSOR_RELIABLE_JOURNAL_DELIVERY:-}"
-EBPF_ENABLED="${FLORA_EBPFENABLED:-}"
-HEALTH_URL="http://127.0.0.1:2021/health"
-
 GO_MAX_PROCS="${SENSOR_GO_MAX_PROCS:-2}"
 GO_MEMORY_LIMIT="${SENSOR_GO_MEMORY_LIMIT:-2048MiB}"
 MAX_MEMORY_LIMIT="${SENSOR_MAX_MEMORY_LIMIT:-4G}"
@@ -78,13 +70,6 @@ usage() {
     echo "  uninstall - Remove the sensor and all its configurations"
     echo ""
     echo "Set SENSOR_VERSION to a release version (e.g. 1.12.383) to install it instead of latest."
-    echo "Set SENSOR_INSTALL_MODE=docker to run the sensor as a container instead of a systemd service;"
-    echo "it keeps its configuration and state under SENSOR_DOCKER_DATA_DIR (default /data/groundcover)."
-    echo "SENSOR_METRICS_QUEUE_MAX_SIZE caps the metrics kept on disk while offline (default: the sensor's 50GB)."
-    echo "SENSOR_RELIABLE_JOURNAL_DELIVERY=true resends journal logs written while offline."
-    echo "These choices are kept for later installs. In Docker mode, lines you add to env.conf are kept too."
-    echo "FLORA_EBPFENABLED=true|false overrides eBPF, which needs a kernel with BTF. By default it is on for"
-    echo "systemd where the kernel has BTF, and off for Docker (in Docker it runs the container privileged)."
     exit 1
 }
 
@@ -94,25 +79,6 @@ checkRootPrivileges() {
        exit 1
     fi
     log_info "Running with root privileges"
-}
-
-validateInstallMode() {
-    if [[ "${INSTALL_MODE}" != "systemd" && "${INSTALL_MODE}" != "docker" ]]; then
-        log_error "SENSOR_INSTALL_MODE must be 'systemd' or 'docker'"
-        exit 1
-    fi
-    if [[ -n "${METRICS_QUEUE_MAX_SIZE}" && ! "${METRICS_QUEUE_MAX_SIZE}" =~ ^[1-9][0-9]*(KB|MB|GB|TB|KiB|MiB|GiB|TiB)?$ ]]; then
-        log_error "SENSOR_METRICS_QUEUE_MAX_SIZE must be a size such as 20GB or 512MiB"
-        exit 1
-    fi
-    if [[ -n "${RELIABLE_JOURNAL_DELIVERY}" && "${RELIABLE_JOURNAL_DELIVERY}" != "true" && "${RELIABLE_JOURNAL_DELIVERY}" != "false" ]]; then
-        log_error "SENSOR_RELIABLE_JOURNAL_DELIVERY must be 'true' or 'false'"
-        exit 1
-    fi
-    if [[ -n "${EBPF_ENABLED}" && "${EBPF_ENABLED}" != "true" && "${EBPF_ENABLED}" != "false" ]]; then
-        log_error "FLORA_EBPFENABLED must be 'true' or 'false'"
-        exit 1
-    fi
 }
 
 validateEnvVars() {
@@ -171,7 +137,7 @@ downloadRelease() {
     checkCurl
     
     http_code=$(curl -s -w "%{http_code}" -L -o "${TARBALL_NAME}" "${download_url}")
-
+        
     if [[ "${http_code}" != "200" ]]; then
         rm -f "${TARBALL_NAME}"
         log_error "Failed to download release package"
@@ -215,48 +181,6 @@ prepareSensorConfig() {
     return 0
 }
 
-# applyInstallChoices settles the customer's choices for both install modes and
-# writes them into config.yaml. Choices from an earlier install stay unless this
-# install sets them again.
-applyInstallChoices() {
-    local config="$1" settings="$2" ebpf_default="$3"
-    if [[ -f "${settings}" ]]; then
-        RELIABLE_JOURNAL_DELIVERY="${RELIABLE_JOURNAL_DELIVERY:-$(sed -n 's/^SENSOR_RELIABLE_JOURNAL_DELIVERY=//p' "${settings}")}"
-        METRICS_QUEUE_MAX_SIZE="${METRICS_QUEUE_MAX_SIZE:-$(sed -n 's/^SENSOR_METRICS_QUEUE_MAX_SIZE=//p' "${settings}")}"
-        EBPF_ENABLED="${EBPF_ENABLED:-$(sed -n 's/^FLORA_EBPFENABLED=//p' "${settings}")}"
-    fi
-    RELIABLE_JOURNAL_DELIVERY="${RELIABLE_JOURNAL_DELIVERY:-false}"
-    EBPF_ENABLED="${EBPF_ENABLED:-${ebpf_default}}"
-    # Without BTF flora cannot load eBPF and stops every module, host metrics included.
-    if [[ "${EBPF_ENABLED}" == "true" && ! -e /sys/kernel/btf/vmlinux ]]; then
-        log_error "FLORA_EBPFENABLED=true needs a kernel with BTF (/sys/kernel/btf/vmlinux); this host has none"
-        exit 1
-    fi
-    printf 'SENSOR_RELIABLE_JOURNAL_DELIVERY=%s\nSENSOR_METRICS_QUEUE_MAX_SIZE=%s\nFLORA_EBPFENABLED=%s\n' \
-        "${RELIABLE_JOURNAL_DELIVERY}" "${METRICS_QUEUE_MAX_SIZE}" "${EBPF_ENABLED}" > "${settings}"
-
-    # Offline, metrics wait in an on-disk queue; the oldest go first when it is full.
-    # Unset, the sensor's own default cap applies.
-    if [[ -n "${METRICS_QUEUE_MAX_SIZE}" ]]; then
-        sed -i "s|^\([[:space:]]*maxDiskUsagePerURL:\).*|\1 ${METRICS_QUEUE_MAX_SIZE}|" "${config}"
-    fi
-    # Written into config.yaml: the sensor may ignore an environment variable for a key the release config lacks.
-    # A release config that has its own reliableDelivery block loses it first, so the key appears once.
-    awk -v enabled="${RELIABLE_JOURNAL_DELIVERY}" '
-        {
-            match($0, /^ */); indent = RLENGTH
-            if (skipping && indent > block_indent && $0 !~ /^[[:space:]]*$/) next
-            skipping = 0
-            if ($0 ~ /^[[:space:]]*reliableDelivery:[[:space:]]*$/) { block_indent = indent; skipping = 1; next }
-            print
-            if (enabled == "true" && $0 ~ /^[[:space:]]*journalConfig:[[:space:]]*$/) {
-                pad = substr($0, 1, indent)
-                print pad "  reliableDelivery:"
-                print pad "    enabled: true"
-            }
-        }' "${config}" > "${config}.tmp" && mv "${config}.tmp" "${config}"
-}
-
 prepareSetup() {
     local CONFIG_PATH="${INSTALL_DIR}/config/config.yaml"
     local LOGS_SCRAPE_CONFIG_PATH="${INSTALL_DIR}/${SCRAPE_CONFIG_DIR}/logs-scrape-config.yaml"
@@ -287,14 +211,6 @@ prepareSetup() {
     prepareSensorConfig "${CONFIG_PATH}"
     prepareSensorConfig "${LOGS_SCRAPE_CONFIG_PATH}"
     prepareSensorConfig "${METRICS_SCRAPE_CONFIG_PATH}"
-
-    # The service runs eBPF by default where the kernel supports it.
-    local ebpf_default=false
-    if [[ -e /sys/kernel/btf/vmlinux ]]; then
-        ebpf_default=true
-    fi
-    mkdir -p "${ENV_DIR}"
-    applyInstallChoices "${CONFIG_PATH}" "${ENV_DIR}/installer.conf" "${ebpf_default}"
 }
 
 setupServiceEnv() {
@@ -322,9 +238,41 @@ EOL
     echo "FLORA_CONTAINERREPOSITORY_TRACKEDCONTAINERTYPE=docker" >> "${ENV_PATH}"
     echo "GOMAXPROCS=${GO_MAX_PROCS}" >> "${ENV_PATH}"
     echo "GOMEMLIMIT=${GO_MEMORY_LIMIT}" >> "${ENV_PATH}"
-    echo "FLORA_EBPFENABLED=${EBPF_ENABLED}" >> "${ENV_PATH}"
+    local ebpf
+    ebpf=$(ebpfSetting)
+    if [[ -n "${ebpf}" ]]; then
+        echo "FLORA_EBPFENABLED=${ebpf}" >> "${ENV_PATH}"
+    fi
 
     log_success "Environment configuration completed"
+}
+
+# ebpfSetting prints the FLORA_EBPFENABLED value for the service: the customer's
+# choice, or false on a kernel without BTF, where eBPF cannot load and flora would
+# stop every module, host metrics included. Empty keeps flora's default, on.
+ebpfSetting() {
+    local btf="${SENSOR_BTF_PATH:-/sys/kernel/btf/vmlinux}"
+    case "${FLORA_EBPFENABLED:-}" in
+        "")
+            if [[ ! -e "${btf}" ]]; then
+                echo false
+            fi
+            ;;
+        false)
+            echo false
+            ;;
+        true)
+            if [[ ! -e "${btf}" ]]; then
+                log_error "FLORA_EBPFENABLED=true needs a kernel with BTF (${btf}); this host has none"
+                return 1
+            fi
+            echo true
+            ;;
+        *)
+            log_error "FLORA_EBPFENABLED must be 'true' or 'false'"
+            return 1
+            ;;
+    esac
 }
 
 installSensor() {
@@ -406,157 +354,6 @@ uninstallSensor() {
 
 }
 
-checkDocker() {
-    if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
-        log_error "Docker installation requires a running Docker daemon"
-        exit 1
-    fi
-}
-
-resolveLatestVersion() {
-    # The image is published per release only, so `latest` becomes the newest release tag.
-    local latest_url
-    latest_url=$(curl -s -o /dev/null -w "%{redirect_url}" "https://github.com/groundcover-com/sensor-release/releases/latest")
-    SENSOR_VERSION="${latest_url##*/}"
-    if [[ ! "${SENSOR_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-        log_error "Failed to resolve the latest sensor version; set SENSOR_VERSION"
-        exit 1
-    fi
-    log_info "Latest sensor version: ${SENSOR_VERSION}"
-}
-
-prepareDockerSetup() {
-    # Download into the data directory: the working directory may be read-only.
-    TARBALL_NAME="${DOCKER_DATA_DIR}/${TARBALL_NAME##*/}"
-
-    log_info "Preparing sensor data directory: ${DOCKER_DATA_DIR}"
-    if ! mkdir -p "${DOCKER_DATA_DIR}/state/positions" "${DOCKER_DATA_DIR}/state/vmagent_pq"; then
-        log_error "Cannot write ${DOCKER_DATA_DIR}; set SENSOR_DOCKER_DATA_DIR to a writable, persistent directory"
-        exit 1
-    fi
-
-    downloadRelease
-    log_info "Extracting sensor configuration"
-    if ! tar -xzf "${TARBALL_NAME}" -C "${DOCKER_DATA_DIR}" config "${SCRAPE_CONFIG_DIR}"; then
-        rm -f "${TARBALL_NAME}"
-        log_error "Failed to extract sensor configuration"
-        exit 1
-    fi
-    rm -f "${TARBALL_NAME}"
-
-    prepareSensorConfig "${DOCKER_DATA_DIR}/config/config.yaml"
-    prepareSensorConfig "${DOCKER_DATA_DIR}/${SCRAPE_CONFIG_DIR}/logs-scrape-config.yaml"
-    prepareSensorConfig "${DOCKER_DATA_DIR}/${SCRAPE_CONFIG_DIR}/metrics-scrape-config.yaml"
-
-    # The package ships a positions file relative to its working directory,
-    # which is the container's read-only root.
-    sed -i 's|^\([[:space:]]*positionsFile:\).*|\1 /var/run/positions/positions.yaml|' "${DOCKER_DATA_DIR}/config/config.yaml"
-    # The queue directory is mounted from the data directory.
-    sed -i 's|^\([[:space:]]*tmpDataPath:\).*|\1 /vmagent_pq/vmagent-remotewrite-data|' "${DOCKER_DATA_DIR}/config/config.yaml"
-    # A container runs eBPF only when asked: it needs a privileged container.
-    applyInstallChoices "${DOCKER_DATA_DIR}/config/config.yaml" "${DOCKER_DATA_DIR}/installer.conf" false
-
-    if [[ ! -f "${DOCKER_DATA_DIR}/config/overrides.yaml" ]]; then
-        echo "# Overrides Configuration File" > "${DOCKER_DATA_DIR}/config/overrides.yaml"
-    fi
-
-    local env_path="${DOCKER_DATA_DIR}/env.conf"
-    local managed='^(API_KEY|CONFIG_OVERRIDES_PATH|FLORA_EBPFENABLED|FLORA_PROMETHEUSSERVER_ENABLED|FLORA_CONTAINERREPOSITORY_TRACKEDCONTAINERTYPE|FLORA_SYSTEMINFO_HOSTMOUNTPATH|GOMAXPROCS|GOMEMLIMIT)='
-    local customer=""
-    if [[ -f "${env_path}" ]]; then
-        customer=$(grep -Ev "${managed}" "${env_path}" || true)
-    fi
-    : > "${env_path}"
-    chmod 600 "${env_path}"
-    {
-        echo "API_KEY=${API_KEY}"
-        echo "CONFIG_OVERRIDES_PATH=/config/overrides.yaml"
-        echo "FLORA_EBPFENABLED=${EBPF_ENABLED}"
-        echo "FLORA_PROMETHEUSSERVER_ENABLED=false"
-        echo "FLORA_CONTAINERREPOSITORY_TRACKEDCONTAINERTYPE=docker"
-        echo "FLORA_SYSTEMINFO_HOSTMOUNTPATH=/host"
-        echo "GOMAXPROCS=${GO_MAX_PROCS}"
-        echo "GOMEMLIMIT=${GO_MEMORY_LIMIT}"
-        if [[ -n "${customer}" ]]; then
-            printf '%s\n' "${customer}"
-        fi
-    } >> "${env_path}"
-}
-
-startDockerSensor() {
-    local image="${IMAGE_REPOSITORY}:${SENSOR_VERSION}"
-    local mounts=(
-        -v "${DOCKER_DATA_DIR}/config:/config:ro"
-        -v "${DOCKER_DATA_DIR}/${SCRAPE_CONFIG_DIR}:/${SCRAPE_CONFIG_DIR}:ro"
-        -v "${DOCKER_DATA_DIR}/state/positions:/var/run/positions"
-        -v "${DOCKER_DATA_DIR}/state/vmagent_pq:/vmagent_pq"
-        -v "/:/host:ro"
-    )
-    local path
-    # eBPF probes the host kernel and its processes.
-    local ebpf=()
-    if [[ "${EBPF_ENABLED}" == "true" ]]; then
-        ebpf=(--privileged --pid host)
-        for path in /sys/kernel/debug /sys/kernel/tracing /sys/fs/bpf; do
-            if [[ -e "${path}" ]]; then
-                ebpf+=(-v "${path}:${path}")
-            fi
-        done
-    fi
-    # The sensor reads these at fixed paths, with no host prefix.
-    for path in /var/log/journal /run/log/journal /etc/machine-id /var/run/docker.sock; do
-        if [[ -e "${path}" ]]; then
-            mounts+=(-v "${path}:${path}:ro")
-        fi
-    done
-
-    # main runs under `||`, which disables `set -e`, so each docker step checks itself.
-    log_info "Pulling sensor image ${image}"
-    if ! docker pull "${image}" >/dev/null; then
-        log_error "Failed to pull sensor image ${image}"
-        exit 1
-    fi
-
-    if docker inspect "${SENSOR_NAME}" >/dev/null 2>&1; then
-        log_info "Replacing existing sensor container"
-        docker rm -f "${SENSOR_NAME}" >/dev/null
-    fi
-
-    log_info "Starting sensor container"
-    # NET_ADMIN lets flora read per-process CPU and disk delay through the kernel's taskstats interface.
-    if ! docker run -d --name "${SENSOR_NAME}" --restart unless-stopped \
-        --read-only --tmpfs /tmp --network host --cap-add NET_ADMIN \
-        --memory "${MAX_MEMORY_LIMIT}" \
-        --env-file "${DOCKER_DATA_DIR}/env.conf" -e "HOSTNAME=$(hostname)" \
-        "${ebpf[@]}" "${mounts[@]}" "${image}" >/dev/null; then
-        log_error "Failed to start sensor container"
-        exit 1
-    fi
-
-    local attempt
-    for attempt in $(seq 1 60); do
-        if curl -fsS --max-time 2 "${HEALTH_URL}" >/dev/null 2>&1; then
-            log_success "groundcover sensor is up and running"
-            log_info "To view sensor logs: docker logs ${SENSOR_NAME}"
-            return 0
-        fi
-        sleep 2
-    done
-
-    log_error "Sensor did not become healthy. Recent logs:"
-    docker logs --tail 50 "${SENSOR_NAME}"
-    exit 1
-}
-
-uninstallDockerSensor() {
-    log_info "Starting uninstallation process"
-    if docker inspect "${SENSOR_NAME}" >/dev/null 2>&1; then
-        log_info "Removing sensor container"
-        docker rm -f "${SENSOR_NAME}" >/dev/null
-    fi
-    log_success "Uninstallation completed; data kept in ${DOCKER_DATA_DIR}"
-}
-
 checkConnectivity() {
     log_info "Checking connectivity to groundcover backend"
     local health_url="https://${GC_DOMAIN}/health/live"
@@ -577,16 +374,6 @@ checkConnectivity() {
 install() {
     validateEnvVars
     printBanner
-    if [[ "${INSTALL_MODE}" == "docker" ]]; then
-        checkDocker
-        checkConnectivity
-        if [[ "${SENSOR_VERSION}" == "latest" ]]; then
-            resolveLatestVersion
-        fi
-        prepareDockerSetup
-        startDockerSensor
-        return
-    fi
     checkConnectivity
     downloadRelease
     prepareSetup
@@ -596,18 +383,13 @@ install() {
 
 uninstall() {
     printBanner
-    if [[ "${INSTALL_MODE}" == "docker" ]]; then
-        checkDocker
-        uninstallDockerSensor
-        return
-    fi
     uninstallSensor
 }
 
 main() {
     checkRootPrivileges
-    validateInstallMode
-
+    ebpfSetting >/dev/null || exit 1
+    
     case "$1" in
         "install")
             install
