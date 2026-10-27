@@ -1,0 +1,24 @@
+# groundcover sensor as a Docker Compose service, without eBPF.
+# Prepare /data/groundcover first (see README.md): config/, scrape-config/ and env.conf.
+services:
+  groundcover-sensor:
+    image: ${SENSOR_IMAGE:-public.ecr.aws/groundcovercom/sensor}:${SENSOR_VERSION:?set the pinned sensor version}
+    container_name: groundcover-sensor
+    restart: unless-stopped
+    read_only: true
+    network_mode: host
+    # Lets flora read per-process CPU and disk delay through the kernel's taskstats interface.
+    cap_add: [NET_ADMIN]
+    tmpfs: [/tmp]
+    mem_limit: 1g
+    cpus: 1
+    env_file: /data/groundcover/env.conf
+    volumes:
+      - /data/groundcover/config:/config:ro
+      - /data/groundcover/scrape-config:/scrape-config:ro
+      - /data/groundcover/state/positions:/var/run/positions
+      - /data/groundcover/state/vmagent_pq:/vmagent_pq
+      - /:/host:ro
+      - /var/log/journal:/var/log/journal:ro
+      - /etc/machine-id:/etc/machine-id:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
