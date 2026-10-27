@@ -123,6 +123,47 @@ class Appliance:
         self.temp.cleanup()
 
 
+RELEASE_JOURNAL_CONFIG = """logs:
+  scraper:
+    journalConfig:
+      checkInterval: 5s
+      reliableDelivery:
+        enabled: false
+      serviceNames:
+      - docker
+exporters:
+  remotewrite:
+    maxDiskUsagePerURL:
+"""
+
+
+class InstallChoicesTest(unittest.TestCase):
+    """applyInstallChoices from install.sh, run on its own against a config file."""
+
+    def apply(self, config, **choices):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'config.yaml'
+            path.write_text(config)
+            script = ('eval "$(grep -E \'^(RELIABLE_JOURNAL_DELIVERY|METRICS_QUEUE_MAX_SIZE|EBPF_ENABLED)=\' "$1")"; '
+                      'eval "$(sed -n \'/^applyInstallChoices() {/,/^}/p\' "$1")"; log_error() { echo "$*"; }; '
+                      'applyInstallChoices "$2" "$3" false')
+            env = dict(os.environ, **choices)
+            subprocess.run(['bash', '-c', script, '_', str(Path(__file__).parent.parent / 'install.sh'),
+                            str(path), str(Path(directory) / 'installer.conf')], env=env, check=True)
+            return path.read_text()
+
+    def test_opting_in_replaces_the_release_config_s_own_setting(self):
+        config = self.apply(RELEASE_JOURNAL_CONFIG, SENSOR_RELIABLE_JOURNAL_DELIVERY='true')
+        self.assertEqual(config.count('reliableDelivery:'), 1, config)
+        self.assertRegex(config, r'(?m)^( *)journalConfig: *\n\1  reliableDelivery:\n\1    enabled: true$')
+        self.assertIn('      serviceNames:\n      - docker', config)
+
+    def test_staying_out_leaves_no_enabled_setting(self):
+        config = self.apply(RELEASE_JOURNAL_CONFIG, SENSOR_RELIABLE_JOURNAL_DELIVERY='false')
+        self.assertNotIn('enabled: true', config)
+        self.assertLessEqual(config.count('reliableDelivery:'), 1, config)
+
+
 class DockerInstallTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

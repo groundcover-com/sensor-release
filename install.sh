@@ -241,10 +241,20 @@ applyInstallChoices() {
         sed -i "s|^\([[:space:]]*maxDiskUsagePerURL:\).*|\1 ${METRICS_QUEUE_MAX_SIZE}|" "${config}"
     fi
     # Written into config.yaml: the sensor may ignore an environment variable for a key the release config lacks.
-    if [[ "${RELIABLE_JOURNAL_DELIVERY}" == "true" ]]; then
-        awk '{ print } /^[[:space:]]*journalConfig:[[:space:]]*$/ { match($0, /^ */); pad = substr($0, 1, RLENGTH); print pad "  reliableDelivery:"; print pad "    enabled: true" }' \
-            "${config}" > "${config}.tmp" && mv "${config}.tmp" "${config}"
-    fi
+    # A release config that has its own reliableDelivery block loses it first, so the key appears once.
+    awk -v enabled="${RELIABLE_JOURNAL_DELIVERY}" '
+        {
+            match($0, /^ */); indent = RLENGTH
+            if (skipping && indent > block_indent && $0 !~ /^[[:space:]]*$/) next
+            skipping = 0
+            if ($0 ~ /^[[:space:]]*reliableDelivery:[[:space:]]*$/) { block_indent = indent; skipping = 1; next }
+            print
+            if (enabled == "true" && $0 ~ /^[[:space:]]*journalConfig:[[:space:]]*$/) {
+                pad = substr($0, 1, indent)
+                print pad "  reliableDelivery:"
+                print pad "    enabled: true"
+            }
+        }' "${config}" > "${config}.tmp" && mv "${config}.tmp" "${config}"
 }
 
 prepareSetup() {
