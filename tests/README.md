@@ -16,7 +16,7 @@ so journal logs written while the host is offline are sent after it reconnects;
 sensor releases without that feature ignore the setting. Metrics written while
 offline wait in an on-disk queue under the data directory, capped by
 `SENSOR_METRICS_QUEUE_MAX_SIZE` (default `20GB`). Reinstall updates the
-container while preserving that state, the earlier opt-in and queue cap (kept in
+container while preserving that state, the earlier opt-in, queue cap and eBPF choice (kept in
 `installer.conf` in the data directory) and lines the customer added to the data
 directory's `env.conf`. Uninstall removes the managed container and preserves
 the data directory.
@@ -53,3 +53,9 @@ containers are changed.
 For another published release, set `TEST_SENSOR_VERSION`. The default is the
 known published release `1.13.90`. These are installer acceptance tests; they
 do not certify a particular appliance kernel or a customer's BYOC tenant.
+
+`FLORA_EBPFENABLED=true` runs eBPF in Docker mode: the container then runs
+privileged with the host PID namespace and the kernel's debugfs, tracefs and bpffs
+mounted. It is off by default in Docker mode; the systemd service runs eBPF by
+default where the kernel has BTF. In both modes the install refuses
+`FLORA_EBPFENABLED=true` on a kernel without BTF.

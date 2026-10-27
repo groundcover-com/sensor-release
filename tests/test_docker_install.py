@@ -195,12 +195,36 @@ class DockerInstallTest(unittest.TestCase):
                                                check=False).returncode, 0)
             self.assertEqual(appliance.read('/data/groundcover/state/positions/keep'), sentinel)
 
+    def test_ebpf_option_runs_a_privileged_container_until_turned_off(self):
+        with Appliance(self.image) as appliance:
+            result = appliance.install(FLORA_EBPFENABLED='true')
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            appliance.wait_for_sensor()
+            sensor = appliance.sensor()
+            self.assertTrue(sensor['HostConfig']['Privileged'])
+            self.assertEqual(sensor['HostConfig']['PidMode'], 'host')
+            self.assertIn('FLORA_EBPFENABLED=true', sensor['Config']['Env'])
+
+            # A plain reinstall keeps the choice.
+            result = appliance.install()
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertTrue(appliance.sensor()['HostConfig']['Privileged'])
+
+            result = appliance.install(FLORA_EBPFENABLED='false')
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            sensor = appliance.sensor()
+            self.assertFalse(sensor['HostConfig']['Privileged'])
+            self.assertIn('FLORA_EBPFENABLED=false', sensor['Config']['Env'])
+
     def test_install_without_kernel_btf_still_reports_host_metrics(self):
         # Without BTF the eBPF loader fails, and that failure stops every flora module,
         # host metrics included, while the sensor itself stays healthy.
         with Appliance(self.image, kernel_btf=False) as appliance:
             self.assertNotEqual(appliance.host(['test', '-e', '/sys/kernel/btf/vmlinux'],
                                                check=False).returncode, 0)
+            result = appliance.install(FLORA_EBPFENABLED='true')
+            self.assertNotEqual(result.returncode, 0, 'eBPF without BTF would stop every flora module')
+            self.assertIn('needs a kernel with BTF', result.stdout + result.stderr)
             result = appliance.install()
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             appliance.wait_for_sensor()

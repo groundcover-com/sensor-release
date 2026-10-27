@@ -61,6 +61,7 @@ DOCKER_DATA_DIR="${SENSOR_DOCKER_DATA_DIR:-/data/groundcover}"
 IMAGE_REPOSITORY="${SENSOR_IMAGE_REPOSITORY:-public.ecr.aws/groundcovercom/sensor}"
 METRICS_QUEUE_MAX_SIZE="${SENSOR_METRICS_QUEUE_MAX_SIZE:-}"
 RELIABLE_JOURNAL_DELIVERY="${SENSOR_RELIABLE_JOURNAL_DELIVERY:-}"
+EBPF_ENABLED="${FLORA_EBPFENABLED:-}"
 HEALTH_URL="http://127.0.0.1:2021/health"
 
 GO_MAX_PROCS="${SENSOR_GO_MAX_PROCS:-2}"
@@ -82,6 +83,8 @@ usage() {
     echo "In Docker mode, SENSOR_METRICS_QUEUE_MAX_SIZE caps the metrics kept on disk while offline (default 20GB)."
     echo "In Docker mode, SENSOR_RELIABLE_JOURNAL_DELIVERY=true resends journal logs written while offline;"
     echo "the choice is kept for later installs. Lines you add to the data directory's env.conf are kept too."
+    echo "FLORA_EBPFENABLED=true|false overrides eBPF, which needs a kernel with BTF. By default it is on for"
+    echo "systemd where the kernel has BTF, and off for Docker (in Docker it runs the container privileged)."
     exit 1
 }
 
@@ -104,6 +107,15 @@ validateInstallMode() {
     fi
     if [[ -n "${RELIABLE_JOURNAL_DELIVERY}" && "${RELIABLE_JOURNAL_DELIVERY}" != "true" && "${RELIABLE_JOURNAL_DELIVERY}" != "false" ]]; then
         log_error "SENSOR_RELIABLE_JOURNAL_DELIVERY must be 'true' or 'false'"
+        exit 1
+    fi
+    if [[ -n "${EBPF_ENABLED}" && "${EBPF_ENABLED}" != "true" && "${EBPF_ENABLED}" != "false" ]]; then
+        log_error "FLORA_EBPFENABLED must be 'true' or 'false'"
+        exit 1
+    fi
+    # Without BTF flora cannot load eBPF and stops every module, host metrics included.
+    if [[ "${EBPF_ENABLED}" == "true" && ! -e /sys/kernel/btf/vmlinux ]]; then
+        log_error "FLORA_EBPFENABLED=true needs a kernel with BTF (/sys/kernel/btf/vmlinux); this host has none"
         exit 1
     fi
 }
@@ -265,6 +277,14 @@ EOL
     echo "FLORA_CONTAINERREPOSITORY_TRACKEDCONTAINERTYPE=docker" >> "${ENV_PATH}"
     echo "GOMAXPROCS=${GO_MAX_PROCS}" >> "${ENV_PATH}"
     echo "GOMEMLIMIT=${GO_MEMORY_LIMIT}" >> "${ENV_PATH}"
+    # The service runs eBPF by default where the kernel supports it.
+    if [[ -z "${EBPF_ENABLED}" && ! -e /sys/kernel/btf/vmlinux ]]; then
+        log_info "This kernel has no BTF, so the sensor runs without eBPF"
+        EBPF_ENABLED=false
+    fi
+    if [[ -n "${EBPF_ENABLED}" ]]; then
+        echo "FLORA_EBPFENABLED=${EBPF_ENABLED}" >> "${ENV_PATH}"
+    fi
 
     log_success "Environment configuration completed"
 }
@@ -398,11 +418,14 @@ prepareDockerSetup() {
     if [[ -f "${settings}" ]]; then
         RELIABLE_JOURNAL_DELIVERY="${RELIABLE_JOURNAL_DELIVERY:-$(sed -n 's/^SENSOR_RELIABLE_JOURNAL_DELIVERY=//p' "${settings}")}"
         METRICS_QUEUE_MAX_SIZE="${METRICS_QUEUE_MAX_SIZE:-$(sed -n 's/^SENSOR_METRICS_QUEUE_MAX_SIZE=//p' "${settings}")}"
+        EBPF_ENABLED="${EBPF_ENABLED:-$(sed -n 's/^FLORA_EBPFENABLED=//p' "${settings}")}"
     fi
     RELIABLE_JOURNAL_DELIVERY="${RELIABLE_JOURNAL_DELIVERY:-false}"
     METRICS_QUEUE_MAX_SIZE="${METRICS_QUEUE_MAX_SIZE:-20GB}"
-    printf 'SENSOR_RELIABLE_JOURNAL_DELIVERY=%s\nSENSOR_METRICS_QUEUE_MAX_SIZE=%s\n' \
-        "${RELIABLE_JOURNAL_DELIVERY}" "${METRICS_QUEUE_MAX_SIZE}" > "${settings}"
+    # A container runs eBPF only when asked: it needs a privileged container.
+    EBPF_ENABLED="${EBPF_ENABLED:-false}"
+    printf 'SENSOR_RELIABLE_JOURNAL_DELIVERY=%s\nSENSOR_METRICS_QUEUE_MAX_SIZE=%s\nFLORA_EBPFENABLED=%s\n' \
+        "${RELIABLE_JOURNAL_DELIVERY}" "${METRICS_QUEUE_MAX_SIZE}" "${EBPF_ENABLED}" > "${settings}"
 
     # Offline, metrics wait in this on-disk queue under the data directory; the oldest go first when it is full.
     sed -i -e "s|^\([[:space:]]*maxDiskUsagePerURL:\).*|\1 ${METRICS_QUEUE_MAX_SIZE}|" \
@@ -429,7 +452,7 @@ prepareDockerSetup() {
     {
         echo "API_KEY=${API_KEY}"
         echo "CONFIG_OVERRIDES_PATH=/config/overrides.yaml"
-        echo "FLORA_EBPFENABLED=false"
+        echo "FLORA_EBPFENABLED=${EBPF_ENABLED}"
         echo "FLORA_PROMETHEUSSERVER_ENABLED=false"
         echo "FLORA_CONTAINERREPOSITORY_TRACKEDCONTAINERTYPE=docker"
         echo "FLORA_SYSTEMINFO_HOSTMOUNTPATH=/host"
@@ -450,8 +473,18 @@ startDockerSensor() {
         -v "${DOCKER_DATA_DIR}/state/vmagent_pq:/vmagent_pq"
         -v "/:/host:ro"
     )
-    # The sensor reads these at fixed paths, with no host prefix.
     local path
+    # eBPF probes the host kernel and its processes.
+    local ebpf=()
+    if [[ "${EBPF_ENABLED}" == "true" ]]; then
+        ebpf=(--privileged --pid host)
+        for path in /sys/kernel/debug /sys/kernel/tracing /sys/fs/bpf; do
+            if [[ -e "${path}" ]]; then
+                ebpf+=(-v "${path}:${path}")
+            fi
+        done
+    fi
+    # The sensor reads these at fixed paths, with no host prefix.
     for path in /var/log/journal /run/log/journal /etc/machine-id /var/run/docker.sock; do
         if [[ -e "${path}" ]]; then
             mounts+=(-v "${path}:${path}:ro")
@@ -476,7 +509,7 @@ startDockerSensor() {
         --read-only --tmpfs /tmp --network host --cap-add NET_ADMIN \
         --memory "${MAX_MEMORY_LIMIT}" \
         --env-file "${DOCKER_DATA_DIR}/env.conf" -e "HOSTNAME=$(hostname)" \
-        "${mounts[@]}" "${image}" >/dev/null; then
+        "${ebpf[@]}" "${mounts[@]}" "${image}" >/dev/null; then
         log_error "Failed to start sensor container"
         exit 1
     fi
