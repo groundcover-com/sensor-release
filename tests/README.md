@@ -54,8 +54,17 @@ For another published release, set `TEST_SENSOR_VERSION`. The default is the
 known published release `1.13.90`. These are installer acceptance tests; they
 do not certify a particular appliance kernel or a customer's BYOC tenant.
 
-`FLORA_EBPFENABLED=true` runs eBPF in Docker mode: the container then runs
-privileged with the host PID namespace and the kernel's debugfs, tracefs and bpffs
-mounted. It is off by default in Docker mode; the systemd service runs eBPF by
-default where the kernel has BTF. In both modes the install refuses
-`FLORA_EBPFENABLED=true` on a kernel without BTF.
+Install choices are the same in both modes and can be combined freely:
+
+| Choice | Setting | Default |
+| --- | --- | --- |
+| Install mode | `SENSOR_INSTALL_MODE=systemd\|docker` | `systemd` |
+| Metrics queue cap | `SENSOR_METRICS_QUEUE_MAX_SIZE` | `20GB` |
+| Reliable journald delivery | `SENSOR_RELIABLE_JOURNAL_DELIVERY=true\|false` | `false` |
+| eBPF | `FLORA_EBPFENABLED=true\|false` | systemd: on when the kernel has BTF; Docker: off |
+
+The installer keeps choices 2-4 in `installer.conf` (the data directory in Docker
+mode, `/etc/opt/groundcover` for systemd), so a reinstall without them keeps the
+earlier values. eBPF needs a kernel with BTF in both modes; in Docker mode it also
+runs the container privileged with the host PID namespace and the kernel's
+debugfs, tracefs and bpffs mounted. These tests cover the Docker mode only.

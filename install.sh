@@ -80,9 +80,9 @@ usage() {
     echo "Set SENSOR_VERSION to a release version (e.g. 1.12.383) to install it instead of latest."
     echo "Set SENSOR_INSTALL_MODE=docker to run the sensor as a container instead of a systemd service;"
     echo "it keeps its configuration and state under SENSOR_DOCKER_DATA_DIR (default /data/groundcover)."
-    echo "In Docker mode, SENSOR_METRICS_QUEUE_MAX_SIZE caps the metrics kept on disk while offline (default 20GB)."
-    echo "In Docker mode, SENSOR_RELIABLE_JOURNAL_DELIVERY=true resends journal logs written while offline;"
-    echo "the choice is kept for later installs. Lines you add to the data directory's env.conf are kept too."
+    echo "SENSOR_METRICS_QUEUE_MAX_SIZE caps the metrics kept on disk while offline (default 20GB)."
+    echo "SENSOR_RELIABLE_JOURNAL_DELIVERY=true resends journal logs written while offline."
+    echo "These choices are kept for later installs. In Docker mode, lines you add to env.conf are kept too."
     echo "FLORA_EBPFENABLED=true|false overrides eBPF, which needs a kernel with BTF. By default it is on for"
     echo "systemd where the kernel has BTF, and off for Docker (in Docker it runs the container privileged)."
     exit 1
@@ -111,11 +111,6 @@ validateInstallMode() {
     fi
     if [[ -n "${EBPF_ENABLED}" && "${EBPF_ENABLED}" != "true" && "${EBPF_ENABLED}" != "false" ]]; then
         log_error "FLORA_EBPFENABLED must be 'true' or 'false'"
-        exit 1
-    fi
-    # Without BTF flora cannot load eBPF and stops every module, host metrics included.
-    if [[ "${EBPF_ENABLED}" == "true" && ! -e /sys/kernel/btf/vmlinux ]]; then
-        log_error "FLORA_EBPFENABLED=true needs a kernel with BTF (/sys/kernel/btf/vmlinux); this host has none"
         exit 1
     fi
 }
@@ -220,6 +215,36 @@ prepareSensorConfig() {
     return 0
 }
 
+# applyInstallChoices settles the customer's choices for both install modes and
+# writes them into config.yaml. Choices from an earlier install stay unless this
+# install sets them again.
+applyInstallChoices() {
+    local config="$1" settings="$2" ebpf_default="$3"
+    if [[ -f "${settings}" ]]; then
+        RELIABLE_JOURNAL_DELIVERY="${RELIABLE_JOURNAL_DELIVERY:-$(sed -n 's/^SENSOR_RELIABLE_JOURNAL_DELIVERY=//p' "${settings}")}"
+        METRICS_QUEUE_MAX_SIZE="${METRICS_QUEUE_MAX_SIZE:-$(sed -n 's/^SENSOR_METRICS_QUEUE_MAX_SIZE=//p' "${settings}")}"
+        EBPF_ENABLED="${EBPF_ENABLED:-$(sed -n 's/^FLORA_EBPFENABLED=//p' "${settings}")}"
+    fi
+    RELIABLE_JOURNAL_DELIVERY="${RELIABLE_JOURNAL_DELIVERY:-false}"
+    METRICS_QUEUE_MAX_SIZE="${METRICS_QUEUE_MAX_SIZE:-20GB}"
+    EBPF_ENABLED="${EBPF_ENABLED:-${ebpf_default}}"
+    # Without BTF flora cannot load eBPF and stops every module, host metrics included.
+    if [[ "${EBPF_ENABLED}" == "true" && ! -e /sys/kernel/btf/vmlinux ]]; then
+        log_error "FLORA_EBPFENABLED=true needs a kernel with BTF (/sys/kernel/btf/vmlinux); this host has none"
+        exit 1
+    fi
+    printf 'SENSOR_RELIABLE_JOURNAL_DELIVERY=%s\nSENSOR_METRICS_QUEUE_MAX_SIZE=%s\nFLORA_EBPFENABLED=%s\n' \
+        "${RELIABLE_JOURNAL_DELIVERY}" "${METRICS_QUEUE_MAX_SIZE}" "${EBPF_ENABLED}" > "${settings}"
+
+    # Offline, metrics wait in an on-disk queue; the oldest go first when it is full.
+    sed -i "s|^\([[:space:]]*maxDiskUsagePerURL:\).*|\1 ${METRICS_QUEUE_MAX_SIZE}|" "${config}"
+    # Written into config.yaml: the sensor may ignore an environment variable for a key the release config lacks.
+    if [[ "${RELIABLE_JOURNAL_DELIVERY}" == "true" ]]; then
+        awk '{ print } /^[[:space:]]*journalConfig:[[:space:]]*$/ { match($0, /^ */); pad = substr($0, 1, RLENGTH); print pad "  reliableDelivery:"; print pad "    enabled: true" }' \
+            "${config}" > "${config}.tmp" && mv "${config}.tmp" "${config}"
+    fi
+}
+
 prepareSetup() {
     local CONFIG_PATH="${INSTALL_DIR}/config/config.yaml"
     local LOGS_SCRAPE_CONFIG_PATH="${INSTALL_DIR}/${SCRAPE_CONFIG_DIR}/logs-scrape-config.yaml"
@@ -250,6 +275,14 @@ prepareSetup() {
     prepareSensorConfig "${CONFIG_PATH}"
     prepareSensorConfig "${LOGS_SCRAPE_CONFIG_PATH}"
     prepareSensorConfig "${METRICS_SCRAPE_CONFIG_PATH}"
+
+    # The service runs eBPF by default where the kernel supports it.
+    local ebpf_default=false
+    if [[ -e /sys/kernel/btf/vmlinux ]]; then
+        ebpf_default=true
+    fi
+    mkdir -p "${ENV_DIR}"
+    applyInstallChoices "${CONFIG_PATH}" "${ENV_DIR}/installer.conf" "${ebpf_default}"
 }
 
 setupServiceEnv() {
@@ -277,14 +310,7 @@ EOL
     echo "FLORA_CONTAINERREPOSITORY_TRACKEDCONTAINERTYPE=docker" >> "${ENV_PATH}"
     echo "GOMAXPROCS=${GO_MAX_PROCS}" >> "${ENV_PATH}"
     echo "GOMEMLIMIT=${GO_MEMORY_LIMIT}" >> "${ENV_PATH}"
-    # The service runs eBPF by default where the kernel supports it.
-    if [[ -z "${EBPF_ENABLED}" && ! -e /sys/kernel/btf/vmlinux ]]; then
-        log_info "This kernel has no BTF, so the sensor runs without eBPF"
-        EBPF_ENABLED=false
-    fi
-    if [[ -n "${EBPF_ENABLED}" ]]; then
-        echo "FLORA_EBPFENABLED=${EBPF_ENABLED}" >> "${ENV_PATH}"
-    fi
+    echo "FLORA_EBPFENABLED=${EBPF_ENABLED}" >> "${ENV_PATH}"
 
     log_success "Environment configuration completed"
 }
@@ -413,29 +439,10 @@ prepareDockerSetup() {
     # The package ships a positions file relative to its working directory,
     # which is the container's read-only root.
     sed -i 's|^\([[:space:]]*positionsFile:\).*|\1 /var/run/positions/positions.yaml|' "${DOCKER_DATA_DIR}/config/config.yaml"
-    # Choices from an earlier install stay unless this install sets them again.
-    local settings="${DOCKER_DATA_DIR}/installer.conf"
-    if [[ -f "${settings}" ]]; then
-        RELIABLE_JOURNAL_DELIVERY="${RELIABLE_JOURNAL_DELIVERY:-$(sed -n 's/^SENSOR_RELIABLE_JOURNAL_DELIVERY=//p' "${settings}")}"
-        METRICS_QUEUE_MAX_SIZE="${METRICS_QUEUE_MAX_SIZE:-$(sed -n 's/^SENSOR_METRICS_QUEUE_MAX_SIZE=//p' "${settings}")}"
-        EBPF_ENABLED="${EBPF_ENABLED:-$(sed -n 's/^FLORA_EBPFENABLED=//p' "${settings}")}"
-    fi
-    RELIABLE_JOURNAL_DELIVERY="${RELIABLE_JOURNAL_DELIVERY:-false}"
-    METRICS_QUEUE_MAX_SIZE="${METRICS_QUEUE_MAX_SIZE:-20GB}"
+    # The queue directory is mounted from the data directory.
+    sed -i 's|^\([[:space:]]*tmpDataPath:\).*|\1 /vmagent_pq/vmagent-remotewrite-data|' "${DOCKER_DATA_DIR}/config/config.yaml"
     # A container runs eBPF only when asked: it needs a privileged container.
-    EBPF_ENABLED="${EBPF_ENABLED:-false}"
-    printf 'SENSOR_RELIABLE_JOURNAL_DELIVERY=%s\nSENSOR_METRICS_QUEUE_MAX_SIZE=%s\nFLORA_EBPFENABLED=%s\n' \
-        "${RELIABLE_JOURNAL_DELIVERY}" "${METRICS_QUEUE_MAX_SIZE}" "${EBPF_ENABLED}" > "${settings}"
-
-    # Offline, metrics wait in this on-disk queue under the data directory; the oldest go first when it is full.
-    sed -i -e "s|^\([[:space:]]*maxDiskUsagePerURL:\).*|\1 ${METRICS_QUEUE_MAX_SIZE}|" \
-        -e 's|^\([[:space:]]*tmpDataPath:\).*|\1 /vmagent_pq/vmagent-remotewrite-data|' "${DOCKER_DATA_DIR}/config/config.yaml"
-    # Written into config.yaml: the sensor may ignore an environment variable for a key the release config lacks.
-    if [[ "${RELIABLE_JOURNAL_DELIVERY}" == "true" ]]; then
-        awk '{ print } /^[[:space:]]*journalConfig:[[:space:]]*$/ { match($0, /^ */); pad = substr($0, 1, RLENGTH); print pad "  reliableDelivery:"; print pad "    enabled: true" }' \
-            "${DOCKER_DATA_DIR}/config/config.yaml" > "${DOCKER_DATA_DIR}/config/config.yaml.tmp" \
-            && mv "${DOCKER_DATA_DIR}/config/config.yaml.tmp" "${DOCKER_DATA_DIR}/config/config.yaml"
-    fi
+    applyInstallChoices "${DOCKER_DATA_DIR}/config/config.yaml" "${DOCKER_DATA_DIR}/installer.conf" false
 
     if [[ ! -f "${DOCKER_DATA_DIR}/config/overrides.yaml" ]]; then
         echo "# Overrides Configuration File" > "${DOCKER_DATA_DIR}/config/overrides.yaml"
