@@ -15,7 +15,7 @@ to reliable journald delivery (`reliableDelivery.enabled` under `journalConfig`)
 so journal logs written while the host is offline are sent after it reconnects;
 sensor releases without that feature ignore the setting. Metrics written while
 offline wait in an on-disk queue under the data directory, capped by
-`SENSOR_METRICS_QUEUE_MAX_SIZE` (default `20GB`). Reinstall updates the
+`SENSOR_METRICS_QUEUE_MAX_SIZE` (default: the sensor's `50GB`). Reinstall updates the
 container while preserving that state, the earlier opt-in, queue cap and eBPF choice (kept in
 `installer.conf` in the data directory) and lines the customer added to the data
 directory's `env.conf`. Uninstall removes the managed container and preserves
@@ -59,7 +59,7 @@ Install choices are the same in both modes and can be combined freely:
 | Choice | Setting | Default |
 | --- | --- | --- |
 | Install mode | `SENSOR_INSTALL_MODE=systemd\|docker` | `systemd` |
-| Metrics queue cap | `SENSOR_METRICS_QUEUE_MAX_SIZE` | `20GB` |
+| Metrics queue cap | `SENSOR_METRICS_QUEUE_MAX_SIZE` | the sensor's default, `50GB` |
 | Reliable journald delivery | `SENSOR_RELIABLE_JOURNAL_DELIVERY=true\|false` | `false` |
 | eBPF | `FLORA_EBPFENABLED=true\|false` | systemd: on when the kernel has BTF; Docker: off |
 

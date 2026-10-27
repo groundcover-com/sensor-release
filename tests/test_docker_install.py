@@ -160,7 +160,7 @@ class DockerInstallTest(unittest.TestCase):
             reliable = r'(?m)^( *)journalConfig: *\n\1  reliableDelivery:\n\1    enabled: true$'
             self.assertNotRegex(config, reliable, 'reliable journald delivery is opt-in')
             # Offline metrics wait in the mounted queue, capped so they cannot fill the data disk.
-            self.assertRegex(config, r'(?m)^ *maxDiskUsagePerURL: 20GB$')
+            self.assertRegex(config, r'(?m)^ *maxDiskUsagePerURL: *$', 'unset, the sensor keeps its own default cap')
             self.assertRegex(config, r'(?m)^ *tmpDataPath: /vmagent_pq/vmagent-remotewrite-data$')
 
             # Reinstall is the customer's update path; existing state and choices must survive.

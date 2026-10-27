@@ -80,7 +80,7 @@ usage() {
     echo "Set SENSOR_VERSION to a release version (e.g. 1.12.383) to install it instead of latest."
     echo "Set SENSOR_INSTALL_MODE=docker to run the sensor as a container instead of a systemd service;"
     echo "it keeps its configuration and state under SENSOR_DOCKER_DATA_DIR (default /data/groundcover)."
-    echo "SENSOR_METRICS_QUEUE_MAX_SIZE caps the metrics kept on disk while offline (default 20GB)."
+    echo "SENSOR_METRICS_QUEUE_MAX_SIZE caps the metrics kept on disk while offline (default: the sensor's 50GB)."
     echo "SENSOR_RELIABLE_JOURNAL_DELIVERY=true resends journal logs written while offline."
     echo "These choices are kept for later installs. In Docker mode, lines you add to env.conf are kept too."
     echo "FLORA_EBPFENABLED=true|false overrides eBPF, which needs a kernel with BTF. By default it is on for"
@@ -226,7 +226,6 @@ applyInstallChoices() {
         EBPF_ENABLED="${EBPF_ENABLED:-$(sed -n 's/^FLORA_EBPFENABLED=//p' "${settings}")}"
     fi
     RELIABLE_JOURNAL_DELIVERY="${RELIABLE_JOURNAL_DELIVERY:-false}"
-    METRICS_QUEUE_MAX_SIZE="${METRICS_QUEUE_MAX_SIZE:-20GB}"
     EBPF_ENABLED="${EBPF_ENABLED:-${ebpf_default}}"
     # Without BTF flora cannot load eBPF and stops every module, host metrics included.
     if [[ "${EBPF_ENABLED}" == "true" && ! -e /sys/kernel/btf/vmlinux ]]; then
@@ -237,7 +236,10 @@ applyInstallChoices() {
         "${RELIABLE_JOURNAL_DELIVERY}" "${METRICS_QUEUE_MAX_SIZE}" "${EBPF_ENABLED}" > "${settings}"
 
     # Offline, metrics wait in an on-disk queue; the oldest go first when it is full.
-    sed -i "s|^\([[:space:]]*maxDiskUsagePerURL:\).*|\1 ${METRICS_QUEUE_MAX_SIZE}|" "${config}"
+    # Unset, the sensor's own default cap applies.
+    if [[ -n "${METRICS_QUEUE_MAX_SIZE}" ]]; then
+        sed -i "s|^\([[:space:]]*maxDiskUsagePerURL:\).*|\1 ${METRICS_QUEUE_MAX_SIZE}|" "${config}"
+    fi
     # Written into config.yaml: the sensor may ignore an environment variable for a key the release config lacks.
     if [[ "${RELIABLE_JOURNAL_DELIVERY}" == "true" ]]; then
         awk '{ print } /^[[:space:]]*journalConfig:[[:space:]]*$/ { match($0, /^ */); pad = substr($0, 1, RLENGTH); print pad "  reliableDelivery:"; print pad "    enabled: true" }' \
