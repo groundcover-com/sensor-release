@@ -1,16 +1,24 @@
 # Merged on top of the release's config.yaml. Copy to $SENSOR_DIR/config/overrides.yaml.
 logs:
   scraper:
-    # Read positions and delivery checkpoints live on the persistent state mount.
-    positionsFile: /var/run/positions/positions.yaml
     journalConfig:
       # Journal logs are resent after an outage or a reboot, with their original timestamps.
+      # Container logs then come from the journal only, so each line arrives once.
       reliableDelivery:
         enabled: true
-      # systemd-pstore logs each crash dump in the FILE field of its journal entry.
+      # Units read besides the release's list (docker, groundcover-sensor, kernel).
       serviceTargets:
+        # systemd-pstore logs each crash-dump part in the FILE field of its journal entry.
+        # FILE becomes the log content; MESSAGE, which names the dump and part, is kept
+        # as the journal_message attribute.
         - serviceName: systemd-pstore
           contentField: FILE
+        # Add your own units the same way, e.g.:
+        # - serviceName: example-updater
+  client:
+    otlpExportLimits:
+      # Longer log contents are cut (default 15360 bytes). Raise it if crash-dump parts are larger.
+      maxLogContentSize: 15360
 exporters:
   remotewrite:
     # Metrics written while offline wait here and are sent, oldest first, after reconnect.
