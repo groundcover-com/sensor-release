@@ -238,6 +238,9 @@ EOL
     echo "FLORA_CONTAINERREPOSITORY_TRACKEDCONTAINERTYPE=docker" >> "${ENV_PATH}"
     echo "GOMAXPROCS=${GO_MAX_PROCS}" >> "${ENV_PATH}"
     echo "GOMEMLIMIT=${GO_MEMORY_LIMIT}" >> "${ENV_PATH}"
+    if [[ ! -e /sys/kernel/btf/vmlinux ]]; then
+        echo "FLORA_EBPFENABLED=false" >> "${ENV_PATH}"
+    fi
 
     log_success "Environment configuration completed"
 }
