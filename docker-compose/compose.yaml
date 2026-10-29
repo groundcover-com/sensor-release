@@ -1,7 +1,4 @@
 # Prepare ${SENSOR_DIR:-/data/groundcover} first: see README.md.
-# eBPF is off by default (FLORA_EBPFENABLED=false in env.conf). To turn it on you need a kernel
-# with BTF, FLORA_EBPFENABLED=true, and here: privileged: true, pid: host, and the debugfs,
-# tracefs and bpffs mounts.
 version: "2.4"
 services:
   groundcover-sensor:
@@ -10,11 +7,15 @@ services:
     restart: unless-stopped
     read_only: true
     network_mode: host
+    privileged: false        # eBPF: true
+    # pid: host              # eBPF
     cap_add: [NET_ADMIN]
     tmpfs: [/tmp]
     mem_limit: 1g
     cpus: 1
     env_file: ${SENSOR_DIR:-/data/groundcover}/env.conf
+    environment:
+      FLORA_EBPFENABLED: "false"   # eBPF: "true", only on a kernel with BTF
     volumes:
       - ${SENSOR_DIR:-/data/groundcover}/config:/config:ro
       - ${SENSOR_DIR:-/data/groundcover}/scrape-config:/scrape-config:ro
@@ -24,3 +25,7 @@ services:
       - /var/log/journal:/var/log/journal:ro
       - /etc/machine-id:/etc/machine-id:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      # eBPF:
+      # - /sys/kernel/debug:/sys/kernel/debug
+      # - /sys/kernel/tracing:/sys/kernel/tracing
+      # - /sys/fs/bpf:/sys/fs/bpf
