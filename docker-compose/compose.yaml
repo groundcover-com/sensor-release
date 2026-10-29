@@ -1,5 +1,7 @@
 # groundcover sensor as a Docker Compose service, without eBPF.
-# Prepare /data/groundcover first (see README.md): config/, scrape-config/ and env.conf.
+# Prepare ${SENSOR_DIR:-/data/groundcover} first (see README.md): config/, scrape-config/ and env.conf.
+# Format 2.4 keeps mem_limit and cpus working with docker-compose 1.x, e.g. Ubuntu 20.04's 1.25.
+version: "2.4"
 services:
   groundcover-sensor:
     image: ${SENSOR_IMAGE:-public.ecr.aws/groundcovercom/sensor}:${SENSOR_VERSION:?set the pinned sensor version}
