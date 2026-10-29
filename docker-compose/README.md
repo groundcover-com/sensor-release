@@ -76,6 +76,17 @@ the adjacent `positions.yaml.journal-start` file here; preserve the entire direc
 `NET_ADMIN` lets the sensor read per-process CPU and disk delay through the kernel's
 taskstats interface; without it those two metrics are skipped.
 
+## Initial journal history
+
+In sensor releases containing SEN-1339,
+`logs.scraper.journalConfig.reliableDelivery.initialHistoryDuration` controls how
+far back a fresh installation reads (default `24h`; for example, use `48h` or `1h`).
+Omitting it or setting `0s` uses the default; negative durations are rejected.
+The initial cutoff is persisted beside the positions file. Changing this setting
+after startup does not move the saved cutoff or truncate recovery from an outage.
+Existing reliable checkpoints continue to resume from their saved positions.
+Older sensor releases do not apply this setting.
+
 ## Offline buffering
 
 Logs and metrics are buffered in different places:
