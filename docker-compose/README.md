@@ -1,12 +1,12 @@
 # Running the sensor with Docker Compose
 
-`compose.yaml` runs the sensor as a read-only container without eBPF, with all
-its files under `SENSOR_DIR` (default `/data/groundcover`). Compose only starts
-the container; the files it mounts are prepared once per sensor version, then
-shipped with the release.
+`compose.yaml` runs the sensor as a read-only container without eBPF. All its files
+live under `SENSOR_DIR` (default `/data/groundcover`). Compose only starts the
+container; the files it mounts are prepared once per sensor version, then shipped
+with the release. `compose.yaml` comments each setting and mount.
 
-Set `SENSOR_DIR` on hosts without `/data`, for example `/var/lib/groundcover`.
-It holds the offline metrics buffer, so put it on a disk with room for
+Set `SENSOR_DIR` on hosts without `/data`, for example `/var/lib/groundcover`. It
+holds the offline metrics buffer, so put it on a disk with room for
 `maxDiskUsagePerURL`.
 
 ## Prepare
@@ -23,10 +23,10 @@ It holds the offline metrics buffer, so put it on a disk with room for
 3. Fill the two placeholders in `config/config.yaml` and `scrape-config/*.yaml`:
    `<GC_PLACEHOLDER_ENV_NAME>` (the environment name) and
    `<GC_PLACEHOLDER_DOMAIN>` (the ingestion host).
-4. Copy `overrides.yaml` to `$SENSOR_DIR/config/overrides.yaml`. Change
-   `maxDiskUsagePerURL` there to size the offline metrics buffer.
-5. Copy `env.conf.example` to `$SENSOR_DIR/env.conf` (mode 600) and set
-   `API_KEY`.
+4. Copy `overrides.yaml` to `$SENSOR_DIR/config/overrides.yaml` and add your units
+   under `serviceTargets`.
+5. Copy `env.conf.example` to `$SENSOR_DIR/env.conf` (mode 600), set `API_KEY`,
+   and `HTTPS_PROXY` if traffic goes through a proxy.
 6. Create the state directories:
    `mkdir -p "$SENSOR_DIR"/state/positions "$SENSOR_DIR"/state/vmagent_pq`.
 
@@ -34,21 +34,58 @@ It holds the offline metrics buffer, so put it on a disk with room for
 
 ```bash
 SENSOR_DIR=${SENSOR_DIR} SENSOR_VERSION=${V} docker compose -f compose.yaml up -d
-curl -fsS http://127.0.0.1:2021/health          # healthy
-curl -fsS http://127.0.0.1:9102/metrics | head  # sensor metrics
+curl -fsS http://127.0.0.1:9102/metrics | grep journal_delivery_pending_entries
 ```
 
-`SENSOR_IMAGE` points the service at a mirrored image. Change `mem_limit`,
+`journal_delivery_pending_entries` is the number of journal lines waiting for the
+backend to confirm them: it rises while the backend is unreachable and returns to
+0 after. `SENSOR_IMAGE` points the service at a mirrored image. Change `mem_limit`,
 `cpus`, `GOMAXPROCS` and `GOMEMLIMIT` to the host's budget.
 
-## What each mount is for
+On docker-compose 1.x use `docker-compose -f compose.yaml up -d`. Compose v2 warns
+that `version` is obsolete; the warning is harmless.
 
-| Mount | Why |
-| --- | --- |
-| `config`, `scrape-config` | Sensor configuration, read-only |
-| `state/positions` | Read positions and journal delivery checkpoints |
-| `state/vmagent_pq` | Metrics queued while offline |
-| `/` as `/host` | Host metrics (CPU, memory, disk, network) |
-| `/var/log/journal` | The persistent journal |
-| `/etc/machine-id` | Finds this machine's journal directory |
-| `/var/run/docker.sock` | Container names and metadata |
+## Offline buffering
+
+Logs and metrics are buffered in different places:
+
+| Data | Buffer | Its limit |
+| --- | --- | --- |
+| Journal logs | the journal itself: the sensor moves its position only past lines the backend accepted | journald's `SystemMaxUse` and `SystemMaxFiles`: lines journald deletes before they are sent are lost |
+| Metrics | `state/vmagent_pq` | `maxDiskUsagePerURL`; when full, the oldest data is dropped |
+
+### journald settings (host)
+
+- `Storage=persistent`, with `/var/log/journal` on writable storage.
+- `SystemMaxUse` and `SystemMaxFiles` large enough to hold the longest expected
+  outage at your log rate.
+- `RateLimitIntervalSec` / `RateLimitBurst` (default 10,000 lines per 30 s per unit):
+  journald drops lines above it before any reader sees them. All containers log
+  through `docker.service` and share one budget.
+
+### Sizing the metrics buffer at start-up
+
+Every setting can also come from an environment variable: `GC_` plus its path in
+capitals, with `.` as `_`. The variable wins over `config.yaml` and
+`overrides.yaml`. To cap the buffer at the smaller of 20 GB and half the free space,
+run this in the start-up script before `docker compose up`:
+
+```bash
+free_mb=$(( $(df -Pk "$SENSOR_DIR" | awk 'NR==2 {print $4}') / 1024 ))
+cap_mb=$(( free_mb / 2 )); [ "$cap_mb" -gt 20480 ] && cap_mb=20480
+sed -i '/^GC_EXPORTERS_REMOTEWRITE_MAXDISKUSAGEPERURL=/d' "$SENSOR_DIR/env.conf"
+echo "GC_EXPORTERS_REMOTEWRITE_MAXDISKUSAGEPERURL=${cap_mb}MB" >> "$SENSOR_DIR/env.conf"
+```
+
+## Upgrades
+
+Keep `$SENSOR_DIR/state` when you change `SENSOR_VERSION`: it holds the journal
+checkpoints and the queued metrics. Replace `config/` and `scrape-config/` with
+the new release's files, then reapply the placeholders and `overrides.yaml`.
+
+## Known limits
+
+- Do not enable `receivers.metricsscraper` with `read_only: true`: the scraper
+  writes its configuration to the working directory and the sensor restarts in a loop.
+- A crash dump arrives as one log row per pstore part. Filter on
+  `journal_message` (the dump and part name) to group and order them.
