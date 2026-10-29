@@ -238,41 +238,12 @@ EOL
     echo "FLORA_CONTAINERREPOSITORY_TRACKEDCONTAINERTYPE=docker" >> "${ENV_PATH}"
     echo "GOMAXPROCS=${GO_MAX_PROCS}" >> "${ENV_PATH}"
     echo "GOMEMLIMIT=${GO_MEMORY_LIMIT}" >> "${ENV_PATH}"
-    local ebpf
-    ebpf=$(ebpfSetting)
-    if [[ -n "${ebpf}" ]]; then
-        echo "FLORA_EBPFENABLED=${ebpf}" >> "${ENV_PATH}"
+    # Without BTF eBPF cannot load, and flora would stop every module, host metrics included.
+    if [[ ! -e /sys/kernel/btf/vmlinux ]]; then
+        echo "FLORA_EBPFENABLED=false" >> "${ENV_PATH}"
     fi
 
     log_success "Environment configuration completed"
-}
-
-# ebpfSetting prints the FLORA_EBPFENABLED value for the service: the customer's
-# choice, or false on a kernel without BTF, where eBPF cannot load and flora would
-# stop every module, host metrics included. Empty keeps flora's default, on.
-ebpfSetting() {
-    local btf="${SENSOR_BTF_PATH:-/sys/kernel/btf/vmlinux}"
-    case "${FLORA_EBPFENABLED:-}" in
-        "")
-            if [[ ! -e "${btf}" ]]; then
-                echo false
-            fi
-            ;;
-        false)
-            echo false
-            ;;
-        true)
-            if [[ ! -e "${btf}" ]]; then
-                log_error "FLORA_EBPFENABLED=true needs a kernel with BTF (${btf}); this host has none"
-                return 1
-            fi
-            echo true
-            ;;
-        *)
-            log_error "FLORA_EBPFENABLED must be 'true' or 'false'"
-            return 1
-            ;;
-    esac
 }
 
 installSensor() {
@@ -388,7 +359,6 @@ uninstall() {
 
 main() {
     checkRootPrivileges
-    ebpfSetting >/dev/null || exit 1
     
     case "$1" in
         "install")
