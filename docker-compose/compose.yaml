@@ -1,0 +1,26 @@
+# Prepare ${SENSOR_DIR:-/data/groundcover} first: see README.md.
+version: "2.4"
+services:
+  groundcover-sensor:
+    image: ${SENSOR_IMAGE:-public.ecr.aws/groundcovercom/sensor}:${SENSOR_VERSION:?set the pinned sensor version}
+    container_name: groundcover-sensor
+    restart: unless-stopped
+    read_only: true
+    network_mode: host
+    privileged: false
+    cap_add: [NET_ADMIN]
+    tmpfs: [/tmp]
+    mem_limit: 1g
+    cpus: 1
+    env_file: ${SENSOR_DIR:-/data/groundcover}/env.conf
+    environment:
+      FLORA_EBPFENABLED: "false"
+    volumes:
+      - ${SENSOR_DIR:-/data/groundcover}/config:/config:ro
+      - ${SENSOR_DIR:-/data/groundcover}/scrape-config:/scrape-config:ro
+      - ${SENSOR_DIR:-/data/groundcover}/state/positions:/var/run/positions
+      - ${SENSOR_DIR:-/data/groundcover}/state/vmagent_pq:/vmagent_pq
+      - /:/host:ro
+      - /var/log/journal:/var/log/journal:ro
+      - /etc/machine-id:/etc/machine-id:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro

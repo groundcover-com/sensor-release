@@ -1,0 +1,20 @@
+logs:
+  scraper:
+    journalConfig:
+      # Required for offline log buffering.
+      reliableDelivery:
+        enabled: true
+      # Needed for the crash logs.
+      serviceTargets:
+        - serviceName: systemd-pstore
+          contentField: FILE
+  client:
+    otlpExportLimits:
+      # Longer log contents are cut (default 15360 bytes). Raise it if crash-dump parts are larger.
+      maxLogContentSize: 15360
+exporters:
+  remotewrite:
+    tmpDataPath: /vmagent_pq/vmagent-remotewrite-data
+    # Disk cap of the offline metrics queue; when full, the oldest data is dropped. Lower it on a
+    # small disk, or set it per start with GC_EXPORTERS_REMOTEWRITE_MAXDISKUSAGEPERURL (README).
+    maxDiskUsagePerURL: 20GB
