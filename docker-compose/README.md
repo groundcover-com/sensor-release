@@ -3,7 +3,7 @@
 `compose.yaml` runs the sensor as a read-only container without eBPF. All its files
 live under `SENSOR_DIR` (default `/data/groundcover`). Compose only starts the
 container; the files it mounts are prepared once per sensor version, then shipped
-with the release. `compose.yaml` comments each setting and mount.
+with the release.
 
 Set `SENSOR_DIR` on hosts without `/data`, for example `/var/lib/groundcover`. It
 holds the offline metrics buffer, so put it on a disk with room for
@@ -44,6 +44,21 @@ backend to confirm them: it rises while the backend is unreachable and returns t
 
 On docker-compose 1.x use `docker-compose -f compose.yaml up -d`. Compose v2 warns
 that `version` is obsolete; the warning is harmless.
+
+## What each mount is for
+
+| Mount | Why |
+| --- | --- |
+| `config`, `scrape-config` | The release's configuration and `overrides.yaml`, read-only |
+| `state/positions` | Journal read positions and delivery checkpoints. Keep it across restarts and upgrades, or the whole retained journal is sent again |
+| `state/vmagent_pq` | Metrics waiting while the backend is unreachable |
+| `/` as `/host` | Host CPU, memory, disk and network metrics |
+| `/var/log/journal` | The journal; a symlink into another disk works |
+| `/etc/machine-id` | Finds this machine's journal directory |
+| `/var/run/docker.sock` | Container names and metadata |
+
+`NET_ADMIN` lets the sensor read per-process CPU and disk delay through the kernel's
+taskstats interface; without it those two metrics are skipped.
 
 ## Offline buffering
 
