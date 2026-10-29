@@ -1,5 +1,7 @@
 logs:
   scraper:
+    # Keep checkpoints on the writable, persistent state mount.
+    positionsFile: /var/run/positions/positions.yaml
     journalConfig:
       # Required for offline log buffering.
       reliableDelivery:
