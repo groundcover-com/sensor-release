@@ -7,15 +7,18 @@ services:
     restart: unless-stopped
     read_only: true
     network_mode: host
-    privileged: false        # eBPF: true
-    # pid: host              # eBPF
+    # If eBPF is required, this must be true.
+    privileged: false
+    # If eBPF is required, uncomment.
+    # pid: host
     cap_add: [NET_ADMIN]
     tmpfs: [/tmp]
     mem_limit: 1g
     cpus: 1
     env_file: ${SENSOR_DIR:-/data/groundcover}/env.conf
     environment:
-      FLORA_EBPFENABLED: "false"   # eBPF: "true", only on a kernel with BTF
+      # If eBPF is required, this must be "true"; it needs a kernel with BTF.
+      FLORA_EBPFENABLED: "false"
     volumes:
       - ${SENSOR_DIR:-/data/groundcover}/config:/config:ro
       - ${SENSOR_DIR:-/data/groundcover}/scrape-config:/scrape-config:ro
@@ -25,7 +28,7 @@ services:
       - /var/log/journal:/var/log/journal:ro
       - /etc/machine-id:/etc/machine-id:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      # eBPF:
+      # If eBPF is required, uncomment:
       # - /sys/kernel/debug:/sys/kernel/debug
       # - /sys/kernel/tracing:/sys/kernel/tracing
       # - /sys/fs/bpf:/sys/fs/bpf
