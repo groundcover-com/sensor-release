@@ -69,6 +69,19 @@ Logs and metrics are buffered in different places:
 | Journal logs | the journal itself: the sensor moves its position only past lines the backend accepted | journald's `SystemMaxUse` and `SystemMaxFiles`: lines journald deletes before they are sent are lost |
 | Metrics | `state/vmagent_pq` | `maxDiskUsagePerURL`; when full, the oldest data is dropped |
 
+### Application containers must log to journald
+
+Container logs are covered only when they reach the journal. Docker's default log
+driver is `json-file`, so set `journald` as the daemon default
+(`/etc/docker/daemon.json`: `{"log-driver": "journald"}`) or per service in your own
+compose files (`logging: { driver: journald }`).
+
+| Container log driver | What the sensor does |
+| --- | --- |
+| `journald` | reads it from the journal; kept through outages and reboots |
+| `json-file`, on a host whose default is `json-file` | reads it through the Docker API; lost after a long outage |
+| `json-file`, set on one container of a host whose default is `journald` | does not collect it |
+
 ### journald settings (host)
 
 - `Storage=persistent`, with `/var/log/journal` on writable storage.
@@ -82,15 +95,22 @@ Logs and metrics are buffered in different places:
 
 Every setting can also come from an environment variable: `GC_` plus its path in
 capitals, with `.` as `_`. The variable wins over `config.yaml` and
-`overrides.yaml`. To cap the buffer at the smaller of 20 GB and half the free space,
-run this in the start-up script before `docker compose up`:
+`overrides.yaml`. To cap the buffer at the smaller of 20 GB and half the space
+available to it, run this in the start-up script before `docker compose up`:
 
 ```bash
+queue_mb=$(( $(du -sk "$SENSOR_DIR/state/vmagent_pq" | cut -f1) / 1024 ))
 free_mb=$(( $(df -Pk "$SENSOR_DIR" | awk 'NR==2 {print $4}') / 1024 ))
-cap_mb=$(( free_mb / 2 )); [ "$cap_mb" -gt 20480 ] && cap_mb=20480
+cap_mb=$(( (free_mb + queue_mb) / 2 ))
+[ "$cap_mb" -gt 20480 ] && cap_mb=20480
+[ "$cap_mb" -lt 256 ] && cap_mb=256
 sed -i '/^GC_EXPORTERS_REMOTEWRITE_MAXDISKUSAGEPERURL=/d' "$SENSOR_DIR/env.conf"
 echo "GC_EXPORTERS_REMOTEWRITE_MAXDISKUSAGEPERURL=${cap_mb}MB" >> "$SENSOR_DIR/env.conf"
 ```
+
+The queue's own size counts as available, so a reboot during an outage does not
+shrink the cap below the data already queued and drop it. The floor keeps the cap
+from reaching 0, which means unlimited.
 
 ## Upgrades
 
