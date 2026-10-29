@@ -12,12 +12,12 @@ services:
     tmpfs: [/tmp]
     mem_limit: 1g
     cpus: 1
-    env_file: /data/groundcover/env.conf
+    env_file: ${SENSOR_DIR:-/data/groundcover}/env.conf
     volumes:
-      - /data/groundcover/config:/config:ro
-      - /data/groundcover/scrape-config:/scrape-config:ro
-      - /data/groundcover/state/positions:/var/run/positions
-      - /data/groundcover/state/vmagent_pq:/vmagent_pq
+      - ${SENSOR_DIR:-/data/groundcover}/config:/config:ro
+      - ${SENSOR_DIR:-/data/groundcover}/scrape-config:/scrape-config:ro
+      - ${SENSOR_DIR:-/data/groundcover}/state/positions:/var/run/positions
+      - ${SENSOR_DIR:-/data/groundcover}/state/vmagent_pq:/vmagent_pq
       - /:/host:ro
       - /var/log/journal:/var/log/journal:ro
       - /etc/machine-id:/etc/machine-id:ro

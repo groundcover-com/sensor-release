@@ -1,4 +1,4 @@
-# Merged on top of the release's config.yaml. Copy to /data/groundcover/config/overrides.yaml.
+# Merged on top of the release's config.yaml. Copy to $SENSOR_DIR/config/overrides.yaml.
 logs:
   scraper:
     # Read positions and delivery checkpoints live on the persistent state mount.
