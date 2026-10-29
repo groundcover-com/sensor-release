@@ -1,41 +1,26 @@
-# groundcover sensor as a Docker Compose service. Prepare ${SENSOR_DIR:-/data/groundcover}
-# first (see README.md): config/, scrape-config/ and env.conf.
-# eBPF is off (FLORA_EBPFENABLED=false in env.conf): it needs a kernel with BTF and a
-# privileged container with the host PID namespace, which this file does not grant.
-
-# The compose file format, not the Compose version: 2.4 is the newest format whose
-# mem_limit and cpus docker-compose 1.x applies (3.x moves them to swarm-only keys).
+# Prepare ${SENSOR_DIR:-/data/groundcover} first: see README.md.
+# eBPF is off by default (FLORA_EBPFENABLED=false in env.conf). To turn it on you need a kernel
+# with BTF, FLORA_EBPFENABLED=true, and here: privileged: true, pid: host, and the debugfs,
+# tracefs and bpffs mounts.
 version: "2.4"
 services:
   groundcover-sensor:
-    # ${X:-default} uses X when set, else the default; ${X:?message} stops Compose unless X is set.
     image: ${SENSOR_IMAGE:-public.ecr.aws/groundcovercom/sensor}:${SENSOR_VERSION:?set the pinned sensor version}
     container_name: groundcover-sensor
     restart: unless-stopped
     read_only: true
     network_mode: host
-    # Optional: flora reads per-process CPU and disk delay through the kernel's taskstats
-    # interface. Without it those two metrics are skipped and everything else works.
     cap_add: [NET_ADMIN]
     tmpfs: [/tmp]
     mem_limit: 1g
     cpus: 1
     env_file: ${SENSOR_DIR:-/data/groundcover}/env.conf
     volumes:
-      # The release's config.yaml and overrides.yaml.
       - ${SENSOR_DIR:-/data/groundcover}/config:/config:ro
-      # The release's log and metric scrape configs.
       - ${SENSOR_DIR:-/data/groundcover}/scrape-config:/scrape-config:ro
-      # Journal read positions and delivery checkpoints. Keep it across restarts and upgrades,
-      # or the sensor sends the whole retained journal again.
       - ${SENSOR_DIR:-/data/groundcover}/state/positions:/var/run/positions
-      # Metrics waiting to be sent while the backend is unreachable.
       - ${SENSOR_DIR:-/data/groundcover}/state/vmagent_pq:/vmagent_pq
-      # Host CPU, memory, disk and network metrics.
       - /:/host:ro
-      # The journal; a symlink into another disk works.
       - /var/log/journal:/var/log/journal:ro
-      # Finds this machine's journal directory.
       - /etc/machine-id:/etc/machine-id:ro
-      # Container names and metadata.
       - /var/run/docker.sock:/var/run/docker.sock:ro
