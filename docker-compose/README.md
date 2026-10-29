@@ -33,7 +33,7 @@ holds the offline metrics buffer, so put it on a disk with room for
 ## Run
 
 ```bash
-SENSOR_DIR=${SENSOR_DIR} SENSOR_VERSION=${V} docker compose -f compose.yaml up -d
+SENSOR_DIR=${SENSOR_DIR} SENSOR_VERSION=${V} docker compose -p groundcover -f compose.yaml up -d
 curl -fsS http://127.0.0.1:9102/metrics | grep journal_delivery_pending_entries
 ```
 
@@ -42,8 +42,13 @@ backend to confirm them: it rises while the backend is unreachable and returns t
 0 after. `SENSOR_IMAGE` points the service at a mirrored image. Change `mem_limit`,
 `cpus`, `GOMAXPROCS` and `GOMEMLIMIT` to the host's budget.
 
-On docker-compose 1.x use `docker-compose -f compose.yaml up -d`. Compose v2 warns
-that `version` is obsolete; the warning is harmless.
+On docker-compose 1.x use `docker-compose -p groundcover -f compose.yaml up -d`.
+Compose v2 warns that `version` is obsolete; the warning is harmless.
+
+`-p groundcover` names the Compose project. Without it Compose names the project
+after the directory holding `compose.yaml`, and fails when that is `/`. On a host
+with a read-only root, keep these files on writable storage, e.g.
+`$SENSOR_DIR/compose`.
 
 ## What each mount is for
 
