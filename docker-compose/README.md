@@ -40,7 +40,14 @@ curl -fsS http://127.0.0.1:9102/metrics | grep journal_delivery_pending_entries
 `journal_delivery_pending_entries` is the number of journal lines waiting for the
 backend to confirm them: it rises while the backend is unreachable and returns to
 0 after. `SENSOR_IMAGE` points the service at a mirrored image. Change `mem_limit`,
-`cpus`, `GOMAXPROCS` and `GOMEMLIMIT` to the host's budget.
+`GOMAXPROCS` and `GOMEMLIMIT` to the host's budget.
+
+No CPU quota or relative CPU weight is set in the Compose file. You can add
+`cpu_shares` in a Compose override to set relative priority under CPU contention;
+it is not a hard CPU cap.
+The example sets `GOMAXPROCS=1` to limit Go execution parallelism; it is not a
+container CPU quota. A hard `cpus` limit requires kernel CFS bandwidth support
+(`CONFIG_CFS_BANDWIDTH`), which some appliance kernels omit.
 
 On docker-compose 1.x use `docker-compose -p groundcover -f compose.yaml up -d`.
 Compose v2 warns that `version` is obsolete; the warning is harmless.
@@ -55,15 +62,32 @@ with a read-only root, keep these files on writable storage, e.g.
 | Mount | Why |
 | --- | --- |
 | `config`, `scrape-config` | The release's configuration and `overrides.yaml`, read-only |
-| `state/positions` | Journal read positions and delivery checkpoints. Keep it across restarts and upgrades, or the whole retained journal is sent again |
+| `state/positions` | Journal read positions and delivery checkpoints. Keep it across restarts and upgrades to preserve progress |
 | `state/vmagent_pq` | Metrics waiting while the backend is unreachable |
 | `/` as `/host` | Host CPU, memory, disk and network metrics |
 | `/var/log/journal` | The journal; a symlink into another disk works |
 | `/etc/machine-id` | Finds this machine's journal directory |
 | `/var/run/docker.sock` | Container names and metadata |
 
+`overrides.yaml` sets `logs.scraper.positionsFile` to
+`/var/run/positions/positions.yaml`, inside the writable state mount. A relative
+path such as `positions.yaml` resolves on the read-only container filesystem and
+cannot be saved. Releases that persist an initial journal replay cutoff also keep
+the adjacent `positions.yaml.journal-start` file here; preserve the entire directory.
+
 `NET_ADMIN` lets the sensor read per-process CPU and disk delay through the kernel's
 taskstats interface; without it those two metrics are skipped.
+
+## Initial journal history
+
+In sensor releases containing SEN-1339,
+`logs.scraper.journalConfig.reliableDelivery.initialHistoryDuration` controls how
+far back a fresh installation reads (default `24h`; for example, use `48h` or `1h`).
+Omitting it or setting `0s` uses the default; negative durations are rejected.
+The initial cutoff is persisted beside the positions file. Changing this setting
+after startup does not move the saved cutoff or truncate recovery from an outage.
+Existing reliable checkpoints continue to resume from their saved positions.
+Older sensor releases do not apply this setting.
 
 ## Offline buffering
 

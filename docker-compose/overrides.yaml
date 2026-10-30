@@ -1,9 +1,14 @@
 logs:
   scraper:
+    # Keep checkpoints on the writable, persistent state mount.
+    positionsFile: /var/run/positions/positions.yaml
     journalConfig:
       # Required for offline log buffering.
       reliableDelivery:
         enabled: true
+        # First install only; saved checkpoints/cutoff take precedence on restart.
+        # Requires a sensor release containing SEN-1339.
+        initialHistoryDuration: 24h
       # Needed for the crash logs.
       serviceTargets:
         - serviceName: systemd-pstore

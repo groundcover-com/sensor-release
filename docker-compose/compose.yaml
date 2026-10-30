@@ -11,7 +11,6 @@ services:
     cap_add: [NET_ADMIN]
     tmpfs: [/tmp]
     mem_limit: 1g
-    cpus: 1
     env_file: ${SENSOR_DIR:-/data/groundcover}/env.conf
     environment:
       FLORA_EBPFENABLED: "false"
