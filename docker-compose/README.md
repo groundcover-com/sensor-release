@@ -40,9 +40,11 @@ curl -fsS http://127.0.0.1:9102/metrics | grep journal_delivery_pending_entries
 `journal_delivery_pending_entries` is the number of journal lines waiting for the
 backend to confirm them: it rises while the backend is unreachable and returns to
 0 after. `SENSOR_IMAGE` points the service at a mirrored image. Change `mem_limit`,
-`cpu_shares`, `GOMAXPROCS` and `GOMEMLIMIT` to the host's budget.
+`GOMAXPROCS` and `GOMEMLIMIT` to the host's budget.
 
-`cpu_shares` sets relative priority under CPU contention, not a hard CPU cap.
+No CPU quota or relative CPU weight is set in the Compose file. You can add
+`cpu_shares` in a Compose override to set relative priority under CPU contention;
+it is not a hard CPU cap.
 The example sets `GOMAXPROCS=1` to limit Go execution parallelism; it is not a
 container CPU quota. A hard `cpus` limit requires kernel CFS bandwidth support
 (`CONFIG_CFS_BANDWIDTH`), which some appliance kernels omit.

@@ -11,8 +11,6 @@ services:
     cap_add: [NET_ADMIN]
     tmpfs: [/tmp]
     mem_limit: 1g
-    # Relative CPU weight; avoids CFS bandwidth quotas on minimal host kernels.
-    cpu_shares: 1024
     env_file: ${SENSOR_DIR:-/data/groundcover}/env.conf
     environment:
       FLORA_EBPFENABLED: "false"
