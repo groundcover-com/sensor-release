@@ -59,14 +59,3 @@ release). The flag does not disable eBPF or change collection settings.
 
 For Docker Compose, which does not run this installer, add `GC_ENVTYPE=edge` to
 the sensor's `env.conf` and recreate the container.
-
-## Installer tests
-
-Run the installer acceptance tests in a disposable Linux container. Downloads
-and systemd commands are simulated; the real installer writes its configuration
-and service unit inside the container:
-
-```bash
-docker run --rm -v "$PWD:/src:ro" -w /src python:3.12-slim \
-  python -m unittest discover -s tests -v
-```
