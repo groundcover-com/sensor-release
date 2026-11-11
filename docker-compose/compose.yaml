@@ -14,6 +14,8 @@ services:
     env_file: ${SENSOR_DIR:-/data/groundcover}/env.conf
     environment:
       FLORA_EBPFENABLED: "false"
+      # Uncomment to classify this sensor's telemetry as edge instead of the configured type.
+      # GC_ENVTYPE: "edge"
     volumes:
       - ${SENSOR_DIR:-/data/groundcover}/config:/config:ro
       - ${SENSOR_DIR:-/data/groundcover}/scrape-config:/scrape-config:ro

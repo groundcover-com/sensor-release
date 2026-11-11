@@ -59,23 +59,26 @@ with a read-only root, keep these files on writable storage, e.g.
 
 ### Edge deployments
 
-After completing the preparation steps above, keep `run.sh` beside `compose.yaml`
-and run:
+To classify the sensor's telemetry, including measurements, as `env_type: edge`,
+uncomment `GC_ENVTYPE` under the sensor's `environment` in `compose.yaml`:
 
-```bash
-SENSOR_DIR=${SENSOR_DIR} SENSOR_VERSION=${V} sh ./run.sh --edge
+```yaml
+    environment:
+      FLORA_EBPFENABLED: "false"
+      GC_ENVTYPE: "edge"
 ```
 
-This sets `GC_ENVTYPE=edge` in the existing `env.conf` and recreates the sensor
-through Docker Compose. The sensor reports `env_type: edge` on its telemetry,
-including measurements. The setting takes precedence over `envType` in YAML and
-persists across updates as long as `env.conf` is kept. Remove `GC_ENVTYPE` from
-that file and recreate the container to return to the YAML-configured type
-(`host` in the standalone release).
+Then recreate the container:
 
-`run.sh` supports both Docker Compose v2 and `docker-compose` v1. Without
-`--edge`, it starts/recreates the sensor using the existing configuration. It
-does not download or prepare the release files, or change collection settings.
+```bash
+SENSOR_DIR=${SENSOR_DIR} SENSOR_VERSION=${V} docker compose -p groundcover -f compose.yaml up -d --force-recreate groundcover-sensor
+```
+
+This option is commented out by default, so the existing environment type stays
+unchanged (`host` in the standalone release unless overridden). When enabled,
+it takes precedence over `envType` in YAML and `GC_ENVTYPE` in `env.conf`.
+Comment it out again and recreate the container to use the existing configuration.
+It does not change eBPF or other collection settings.
 
 ## What each mount is for
 
