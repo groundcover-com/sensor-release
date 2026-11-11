@@ -61,15 +61,13 @@ GO_MEMORY_LIMIT="${SENSOR_GO_MEMORY_LIMIT:-2048MiB}"
 MAX_MEMORY_LIMIT="${SENSOR_MAX_MEMORY_LIMIT:-4G}"
 
 REQUIRED_VARS=("API_KEY" "GC_ENV_NAME" "GC_DOMAIN")
-EDGE=false
 
 set -e
 
 usage() {
-    echo "Usage: $0 install [--edge] | uninstall"
+    echo "Usage: $0 [install|uninstall]"
     echo "  install   - Install or update the sensor"
     echo "  uninstall - Remove the sensor and all its configurations"
-    echo "  --edge    - Set the sensor environment type to edge (install only)"
     echo ""
     echo "Set SENSOR_VERSION to a release version (e.g. 1.12.383) to install it instead of latest."
     exit 1
@@ -236,9 +234,6 @@ EOL
     log_info "Writing environment variables"
     echo "API_KEY=$API_KEY" >> "${ENV_PATH}"
     echo "CONFIG_OVERRIDES_PATH=${USER_CONFIG_PATH}" >> "${ENV_PATH}"
-    if [[ "${EDGE}" == true ]]; then
-        echo "GC_ENVTYPE=edge" >> "${ENV_PATH}"
-    fi
     echo "FLORA_PROMETHEUSSERVER_ENABLED=false" >> "${ENV_PATH}"
     echo "FLORA_CONTAINERREPOSITORY_TRACKEDCONTAINERTYPE=docker" >> "${ENV_PATH}"
     echo "GOMAXPROCS=${GO_MAX_PROCS}" >> "${ENV_PATH}"
@@ -366,15 +361,9 @@ main() {
     
     case "$1" in
         "install")
-            if [[ "$#" -eq 2 && "$2" == "--edge" ]]; then
-                EDGE=true
-            elif [[ "$#" -ne 1 ]]; then
-                usage
-            fi
             install
             ;;
         "uninstall")
-            [[ "$#" -eq 1 ]] || usage
             uninstall
             ;;
         *)

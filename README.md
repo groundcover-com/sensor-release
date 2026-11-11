@@ -36,26 +36,3 @@ cannot be combined with a specific `SENSOR_VERSION`.
 
 Version pinning selects a release; it does not verify artifact integrity. The
 command above still downloads the installer from `main`.
-
-## Install an edge sensor
-
-Add `--edge` after `install` to report the sensor's environment type as `edge`:
-
-```bash
-curl -fsSL https://groundcover.com/install-groundcover-sensor.sh |
-  sudo env \
-    API_KEY='{ingestion_Key}' GC_ENV_NAME='{selected_Env}' GC_DOMAIN='{BYOC_ENDPOINT}' \
-    bash -s -- install --edge
-```
-
-You can combine this with `SENSOR_VERSION` to pin a release. The flag writes
-`GC_ENVTYPE=edge` into the service's `env.conf`, overriding `envType` in the base
-configuration and `overrides.yaml` without changing either file. The sensor uses
-this value for `env_type` on its telemetry, including measurements.
-
-Pass `--edge` again on each install or update. Without it, the installer leaves
-the environment type to the sensor configuration (`host` in the standalone
-release). The flag does not disable eBPF or change collection settings.
-
-For Docker Compose, which does not run this installer, add `GC_ENVTYPE=edge` to
-the sensor's `env.conf` and recreate the container.

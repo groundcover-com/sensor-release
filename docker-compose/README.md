@@ -57,6 +57,26 @@ after the directory holding `compose.yaml`, and fails when that is `/`. On a hos
 with a read-only root, keep these files on writable storage, e.g.
 `$SENSOR_DIR/compose`.
 
+### Edge deployments
+
+After completing the preparation steps above, keep `run.sh` beside `compose.yaml`
+and run:
+
+```bash
+SENSOR_DIR=${SENSOR_DIR} SENSOR_VERSION=${V} sh ./run.sh --edge
+```
+
+This sets `GC_ENVTYPE=edge` in the existing `env.conf` and recreates the sensor
+through Docker Compose. The sensor reports `env_type: edge` on its telemetry,
+including measurements. The setting takes precedence over `envType` in YAML and
+persists across updates as long as `env.conf` is kept. Remove `GC_ENVTYPE` from
+that file and recreate the container to return to the YAML-configured type
+(`host` in the standalone release).
+
+`run.sh` supports both Docker Compose v2 and `docker-compose` v1. Without
+`--edge`, it starts/recreates the sensor using the existing configuration. It
+does not download or prepare the release files, or change collection settings.
+
 ## What each mount is for
 
 | Mount | Why |
