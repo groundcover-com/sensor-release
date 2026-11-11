@@ -57,29 +57,6 @@ after the directory holding `compose.yaml`, and fails when that is `/`. On a hos
 with a read-only root, keep these files on writable storage, e.g.
 `$SENSOR_DIR/compose`.
 
-### Edge deployments
-
-To classify the sensor's telemetry, including measurements, as `env_type: edge`,
-uncomment `GC_ENVTYPE` under the sensor's `environment` in `compose.yaml`:
-
-```yaml
-    environment:
-      FLORA_EBPFENABLED: "false"
-      GC_ENVTYPE: "edge"
-```
-
-Then recreate the container:
-
-```bash
-SENSOR_DIR=${SENSOR_DIR} SENSOR_VERSION=${V} docker compose -p groundcover -f compose.yaml up -d --force-recreate groundcover-sensor
-```
-
-This option is commented out by default, so the existing environment type stays
-unchanged (`host` in the standalone release unless overridden). When enabled,
-it takes precedence over `envType` in YAML and `GC_ENVTYPE` in `env.conf`.
-Comment it out again and recreate the container to use the existing configuration.
-It does not change eBPF or other collection settings.
-
 ## What each mount is for
 
 | Mount | Why |
